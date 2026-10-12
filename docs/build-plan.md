@@ -337,7 +337,10 @@ def test_a_success_gives_the_cost_and_the_tokens():
 def test_an_auth_failure_is_not_a_success_although_its_subtype_says_so():
     """The measured trap. The event holds subtype success and is_error true."""
     raw = [line for line in lines_of("auth-401.jsonl") if line.strip()]
-    events = [json.loads(line) for line in raw]
+    # Line 1 of this fixture is a plain-text warning of the child, so the
+    # JSON filter is not optional here. `raw` still holds that line, and
+    # read_stream below must ignore it.
+    events = [json.loads(line) for line in raw if line.startswith("{")]
     result_event = [e for e in events if e.get("type") == "result"][0]
     assert result_event["subtype"] == "success", "the fixture lost its trap"
     assert result_event["is_error"] is True
@@ -3047,6 +3050,7 @@ reviewer who finds the fix must not read it as an accident.
 | 5 | `record.py` imported `__version__` from the package root, and task 9 makes the root import `step.py`, which imports `record.py`. An import cycle. | `version.py` is its own module. |
 | 6 | The README step used a 3-backtick fence and holds `sh` and `toml` blocks. The first inner fence closed the outer one. | A 4-backtick outer fence. |
 | 7 | A step with no `max_usd` printed `limit None USD` on the first console line. | The line says "no cost limit". |
+| 8 | Task 2's auth test ran `json.loads` on every non-blank line of `auth-401.jsonl`, and line 1 of that fixture is a plain-text warning of the child. The test could not run. Found by the task 2 implementer. | The list comprehension keeps only the lines that start with `{`. `raw` still carries the warning line into `read_stream`. |
 
 **Spec coverage.** Each section of `docs/design.md` has a task: section 3 is
 tasks 3 and 8, section 4 is tasks 5, 7 and 8, section 5 is tasks 4 and 5,
