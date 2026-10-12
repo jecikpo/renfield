@@ -1,0 +1,107 @@
+import json
+from pathlib import Path
+
+import pytest
+
+from renfield.stream import describe_event, read_stream
+
+FIXTURES = Path(__file__).parent / "fixtures" / "stream"
+
+
+def lines_of(name):
+    return (FIXTURES / name).read_text().splitlines(keepends=True)
+
+
+def test_a_success_gives_the_cost_and_the_tokens():
+    result = read_stream(lines_of("success.jsonl"))
+    assert result.ok is True
+    assert result.error_class is None
+    assert result.cost_usd > 0
+    assert result.num_turns > 0
+    assert result.cost_known is True
+
+
+def test_an_auth_failure_is_not_a_success_although_its_subtype_says_so():
+    """The measured trap. The event holds subtype success and is_error true."""
+    raw = [line for line in lines_of("auth-401.jsonl") if line.strip()]
+    # The fixture holds a plain-text warning of the child before the events.
+    events = [json.loads(line) for line in raw if line.startswith("{")]
+    result_event = [e for e in events if e.get("type") == "result"][0]
+    assert result_event["subtype"] == "success", "the fixture lost its trap"
+    assert result_event["is_error"] is True
+
+    result = read_stream(raw)
+    assert result.ok is False
+    assert result.error_class == "auth"
+
+
+def test_a_login_message_is_an_auth_failure():
+    result = read_stream(lines_of("auth-not-logged-in.jsonl"))
+    assert result.error_class == "auth"
+
+
+def test_an_exhausted_budget_has_its_own_class():
+    result = read_stream(lines_of("budget-exhausted.jsonl"))
+    assert result.error_class == "budget"
+
+
+def test_a_stream_with_no_result_event_is_transient_and_unmeasured():
+    result = read_stream(lines_of("timeout-killed.jsonl"))
+    assert result.error_class == "transient"
+    assert result.cost_known is False
+    assert result.cost_usd == 0.0
+
+
+def test_the_tool_calls_are_counted_by_name():
+    result = read_stream(lines_of("tool-call.jsonl"))
+    assert sum(result.tool_calls.values()) >= 1
+    assert all(isinstance(name, str) for name in result.tool_calls)
+
+
+def test_a_line_that_is_not_json_is_ignored():
+    stream = ["a warning of the child\n", *lines_of("success.jsonl")]
+    assert read_stream(stream).ok is True
+
+
+def test_a_rate_limit_reads_the_status_and_not_the_subtype():
+    event = {"type": "result", "subtype": "success", "is_error": True,
+             "api_error_status": 429, "result": "whatever"}
+    result = read_stream([json.dumps(event) + "\n"])
+    assert result.error_class == "rate_limited"
+
+
+def test_a_session_limit_in_the_text_is_a_rate_limit():
+    event = {"type": "result", "subtype": "success", "is_error": True,
+             "result": "You've hit your session limit · resets 4:40pm"}
+    assert read_stream([json.dumps(event) + "\n"]).error_class == "rate_limited"
+
+
+@pytest.mark.parametrize("status", [500, 503, 599])
+def test_a_server_failure_is_transient_and_gets_a_retry(status):
+    event = {"type": "result", "subtype": "error", "is_error": True,
+             "api_error_status": status, "result": "x"}
+    assert read_stream([json.dumps(event) + "\n"]).error_class == "transient"
+
+
+def test_a_client_failure_that_is_not_401_403_or_429_is_transient():
+    """There is no class for a 4xx that the measured set does not hold, and
+    `transient` gets a retry. A retry of a 400 costs 1 call and fails again.
+    Open item: measure a 400 before you give it a class of its own."""
+    event = {"type": "result", "subtype": "error", "is_error": True,
+             "api_error_status": 400, "result": "bad request"}
+    assert read_stream([json.dumps(event) + "\n"]).error_class == "transient"
+
+
+def test_describe_event_gives_a_line_for_a_tool_call_and_none_otherwise():
+    call = {"type": "assistant", "message": {"content": [
+        {"type": "tool_use", "name": "Read", "input": {"file_path": "/a/b/plan.md"}}]}}
+    assert describe_event(call) == "Read(plan.md)"
+    assert describe_event({"type": "result"}) is None
+
+
+def test_a_long_argument_is_cut_and_marked():
+    call = {"type": "assistant", "message": {"content": [
+        {"type": "tool_use", "name": "Bash", "input": {"command": "x" * 200}}]}}
+    line = describe_event(call)
+    assert len(line) < 80
+    assert line.endswith("…)")
