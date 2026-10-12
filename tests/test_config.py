@@ -1,6 +1,8 @@
 import pytest
 
-from renfield.config import ConfigError, Settings, load
+from pathlib import Path
+
+from renfield.config import ConfigError, Settings, Skill, Step, load
 
 FULL = """
 [provider]
@@ -228,3 +230,40 @@ def test_a_float_that_is_a_whole_number_is_accepted(tmp_path, key, value):
     text = f'[provider]\nmodel = "m"\n\n[step]\n{key} = {value}\n'
     settings = load(write(tmp_path, text), env={})
     assert getattr(settings.step, key) == int(value)
+
+
+# --- a Step built by hand gets the same ranges as a Step read from a file ---
+
+def by_hand(**changes):
+    values = dict(name="review", model="m")
+    values.update(changes)
+    return Step(**values)
+
+
+@pytest.mark.parametrize(
+    "key, value",
+    [
+        ("name", "Bad Name"),
+        ("name", ""),
+        ("model", ""),
+        ("effort", "turbo"),
+        ("timeout_min", 0),
+        ("timeout_min", 241),
+        ("retries", 3),
+        ("retries", -1),
+        ("max_usd", 0.0),
+        ("max_usd", 1001.0),
+        ("add_dirs", ["not-a-path"]),
+        ("skills", ["not-a-skill"]),
+    ],
+)
+def test_a_step_built_by_hand_is_checked_and_names_the_key(key, value):
+    """run_step is the second reader of a Step. Measured through the public
+    names: Step(timeout_min=0) killed the child at once, with exit -2."""
+    with pytest.raises(ConfigError, match=key):
+        by_hand(**{key: value})
+
+
+def test_a_good_step_built_by_hand_is_accepted():
+    step = by_hand(max_usd=1.0, add_dirs=[Path("a")], skills=[Skill(plugin=Path("p"))])
+    assert step.timeout_min == 20

@@ -52,6 +52,29 @@ class Step:
     add_dirs: list[Path] = field(default_factory=list)
     skills: list[Skill] = field(default_factory=list)
 
+    def __post_init__(self) -> None:
+        """Check every key here, so a caller that builds a Step by hand gets
+        the same ranges as a caller that reads the file. docs/design.md
+        section 5.3 holds the table."""
+        if not NAME_PATTERN.fullmatch(str(self.name)):
+            raise ConfigError(
+                f"name: the value {self.name!r} is not 1 to 64 characters of "
+                f"a-z, 0-9, '-', '_', and '.'"
+            )
+        if not self.model:
+            raise ConfigError("model: no value")
+        _one_of("effort", self.effort, EFFORTS)
+        _in_range("timeout_min", self.timeout_min, TIMEOUT_RANGE, int)
+        _in_range("retries", self.retries, RETRIES_RANGE, int)
+        if self.max_usd is not None:
+            _in_range("max_usd", self.max_usd, MAX_USD_RANGE, float)
+        for folder in self.add_dirs:
+            if not isinstance(folder, Path):
+                raise ConfigError(f"add_dirs: {folder!r} is not a Path")
+        for skill in self.skills:
+            if not isinstance(skill, Skill):
+                raise ConfigError(f"skills: {skill!r} is not a Skill")
+
 
 @dataclass
 class Settings:
