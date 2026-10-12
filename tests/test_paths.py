@@ -67,6 +67,18 @@ def test_an_unknown_placeholder_is_an_error_and_names_the_allowed_ones():
     assert "step" in message and "stamp" in message
 
 
+@pytest.mark.parametrize("bad", ["runs/{step", "runs/step}", "runs/{{step}"])
+def test_an_unbalanced_brace_is_a_path_error_and_names_the_key(bad):
+    """`Formatter().parse` raises a bare ValueError for these 3 forms. The CLI
+    catches PathError only, so a bare ValueError would reach a person as a
+    traceback."""
+    with pytest.raises(PathError) as caught:
+        render(Paths(run_dir=bad), step="x", stamp="s")
+    message = str(caught.value)
+    assert "run_dir" in message
+    assert bad in message
+
+
 def test_an_absolute_value_for_a_relative_key_is_an_error():
     """pathlib drops the left side of a join with an absolute path, so a
     value of /tmp/p.md would leave run_dir with no warning."""

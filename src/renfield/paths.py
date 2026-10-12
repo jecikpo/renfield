@@ -81,9 +81,17 @@ def render(paths: Paths, *, step: str, stamp: str | None = None) -> RunPaths:
 
 def _check(key: str, template: str) -> None:
     """Stop a template that names a placeholder that does not exist."""
-    names = [
-        name for _, name, _, _ in Formatter().parse(template) if name is not None
-    ]
+    try:
+        names = [
+            name for _, name, _, _ in Formatter().parse(template) if name is not None
+        ]
+    except ValueError as error:
+        # `Formatter().parse` raises ValueError for an unbalanced brace. The
+        # CLI of task 9 catches PathError, so a bare ValueError would reach a
+        # person as a traceback.
+        raise PathError(
+            f"{key}: the value {template!r} is not a usable path: {error}"
+        ) from error
     unknown = [name for name in names if name not in PLACEHOLDERS]
     if unknown:
         raise PathError(
