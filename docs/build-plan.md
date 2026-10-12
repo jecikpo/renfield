@@ -3176,16 +3176,23 @@ reviewer who finds the fix must not read it as an accident.
 | 37 | An `--add-dir` that does not exist was dropped with no message, and `add_dirs` had no test at all, so a caller who mistyped a directory paid for a full agent run that could not read its material. Found by the final review. | A named `add_dir` that is not a directory raises `ConfigError`; the `is_dir()` filter stays for the artifacts folder only. 2 tests. |
 | 38 | **The controller's own fix for defect 34 reintroduced the class it was fixing.** `except ProviderError: raise` sat ahead of the record wrapper, so a `Popen` that failed on attempt 2 or 3 lost the record of an attempt that had already been paid for. Measured by the controller with a spy on the second `Popen`: attempt 1 cost 0.70 USD and no `record.json` existed. Found by the fix-wave implementer. | The pass-through folds into the one handler and fires only when `record.attempts <= 1`. 1 test, proved by mutation. |
 | 39 | The defect-30 fix cleaned a non-finite cost in `as_dict` only, so `record.json` held `0.0` with `cost_known: false` while the console line printed `nan USD` for the same record. Found by the fix-wave implementer, measured by the controller. | `read_stream` sets the cost to 0.0 and `cost_known` to false where the number enters the package. The `as_dict` guard stays as a second layer. |
+| 40 | **I4's own measurement survives its own fix.** `except (FileNotFoundError, PermissionError)` around the `Popen` misses every other start failure, and every start failure is an `OSError` relayed before `exec` succeeds. Measured by the re-reviewer with an executable file that holds no shebang: `record.json` reports `unknown_usd 6.0` for a child that never ran and cost nothing, which is the exact measurement defect 34 was raised on. **Not fixed; surfaced to the human.** | 1 line: `except OSError as error`. 1 test. |
+| 41 | **I1's own harm survives, in the file I1 edited.** `cli.py` reads the `--values` file with `json.loads(Path(path).read_text())`, with no encoding, so a UTF-8 values file is double-encoded into the paid prompt on a non-UTF-8 locale. Measured by the re-reviewer under `LC_ALL=en_US.ISO8859-1`: the prompt as sent held `caf\xc3\x83\xc2\xa9` against `caf\xc3\xa9`, status `ok`, 1.25 USD, no report. The line was outside the wave's hunks. **Not fixed; surfaced to the human.** | 1 line: `encoding="utf-8"`. 1 test. |
 
-### What the 39 rows say about this plan
+### What the 41 rows say about this plan
 
-**14 of the 39 are one defect class: a function that raises where it promised
-to return a value.** Rows 9, 10, 14, 15, 17, 19, 21, 22, 26, 31, 33, 34 and 38
-are that class, in 4 modules, found by 4 implementers, 4 task reviewers and the
-final review, over 7 fix rounds. **Row 38 is the worst of them: it is the
+**16 of the 41 are one defect class: a function that raises where it promised
+to return a value.** Rows 9, 10, 14, 15, 17, 19, 21, 22, 26, 31, 33, 34, 38, 40
+and 41 are that class, in 5 modules, found by 4 implementers, 4 task
+reviewers, the final review and its re-review, over 7 fix rounds. **Row 38 is the worst of them: it is the
 controller's own fix for row 34, which reintroduced the class while removing
 it.** That is the strongest argument for the checklist item below, because a
-reviewer had already named the class 13 times and it still happened. Each fix was 1 to 6 lines. The plan specified
+reviewer had already named the class 13 times and it still happened. **Rows 40
+and 41 say the same thing again: each is the original harm of a fix surviving
+that fix, found only because a reviewer looked a second time at the same
+lines.** Rows 38, 40 and 41 together are the measured reason this plan stopped
+fixing and handed the last 2 to a person: in this package, a repair of this
+class has introduced or missed another instance 3 times out of 3. Each fix was 1 to 6 lines. The plan specified
 the behaviour of every one of those functions correctly and never once
 specified the guard.
 
