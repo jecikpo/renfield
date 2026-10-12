@@ -513,3 +513,9 @@ def test_a_model_that_is_not_a_string_is_an_error(tmp_path, value):
     assert "models.m.model" in message
     assert "not a non-empty string" in message
 
+
+@pytest.mark.parametrize("value", [["m"], 5])
+def test_a_model_override_that_is_not_a_string_is_a_config_error(tmp_path, value):
+    message = raised(tmp_path, ONE, overrides={"model": value})
+    assert "model" in message
+    assert "names no entry" in message

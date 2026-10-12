@@ -303,7 +303,7 @@ def _select(entries: Mapping[str, Any], data: Mapping[str, Any], chosen: Any) ->
                 f"The entries are {names}."
             )
     if chosen is not None:
-        if chosen not in entries:
+        if not isinstance(chosen, str) or chosen not in entries:
             raise ConfigError(
                 f"model: the value {chosen!r} names no entry. "
                 f"The entries are {names}."
