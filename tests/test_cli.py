@@ -358,3 +358,63 @@ def test_the_default_config_file_is_read_when_no_config_is_given(
     assert code == 0
     command = call_record(tmp_path)["argv"]
     assert command[command.index("--model") + 1] == "from-the-default-file"
+
+
+# --- named models ---
+
+TWO_MODELS = (
+    'default = "opus"\n\n'
+    '[models.opus]\nmodel = "claude-opus-5-5"\n\n'
+    '[models.flash]\nmodel = "deepseek/deepseek-v4.1-flash"\neffort = "medium"\n'
+)
+
+
+@pytest.mark.parametrize("flag", ["--provider", "--api-key-env"])
+def test_a_removed_provider_flag_exits_2(tmp_path, flag):
+    program = fake_claude(tmp_path, stream=SUCCESS)
+    with pytest.raises(SystemExit) as caught:
+        main(argv(tmp_path, program, flag, "x"))
+    assert caught.value.code == 2
+
+
+def test_the_first_line_names_the_entry_and_the_model(tmp_path, capsys):
+    program = fake_claude(tmp_path, stream=SUCCESS)
+    args = argv(
+        tmp_path, program,
+        "--config", str(config_of(tmp_path, TWO_MODELS, name="two.toml")),
+    )
+    args[args.index("--model") + 1] = "flash"
+    assert main(args) == 0
+    first = capsys.readouterr().out.splitlines()[0]
+    assert first == (
+        "t: flash (deepseek/deepseek-v4.1-flash), effort medium, no cost limit"
+    )
+
+
+def test_render_only_needs_no_key_in_the_environment(tmp_path, monkeypatch, capsys):
+    """A render costs 0 USD. The plugin renders before each paid run, so a
+    render that needs the key blocks the check of the template."""
+    monkeypatch.delenv("RENFIELD_TEST_ABSENT", raising=False)
+    config = config_of(
+        tmp_path,
+        '[models.m]\nmodel = "m"\nkind = "openrouter"\n'
+        'api_key_env = "RENFIELD_TEST_ABSENT"\n',
+        name="paid.toml",
+    )
+    program = fake_claude(tmp_path, stream=SUCCESS)
+    args = argv(tmp_path, program, "--config", str(config), "--render-only")
+    assert main(args) == 0
+    assert (tmp_path / "out" / "prompts" / "t.md").read_text() == "read docs/plan.md\n"
+
+
+def test_a_paid_run_needs_the_key_in_the_environment(tmp_path, monkeypatch, capsys):
+    monkeypatch.delenv("RENFIELD_TEST_ABSENT", raising=False)
+    config = config_of(
+        tmp_path,
+        '[models.m]\nmodel = "m"\nkind = "openrouter"\n'
+        'api_key_env = "RENFIELD_TEST_ABSENT"\n',
+        name="paid.toml",
+    )
+    program = fake_claude(tmp_path, stream=SUCCESS)
+    assert main(argv(tmp_path, program, "--config", str(config))) == 1
+    assert "RENFIELD_TEST_ABSENT" in capsys.readouterr().err

@@ -52,9 +52,9 @@ def main(argv: Sequence[str] | None = None) -> int:
     run.add_argument("--skill", action="append", default=[], metavar="PLUGIN[=INVOKE]")
     for key in ("run-dir", "prompt", "transcript", "artifacts", "record"):
         run.add_argument(f"--{key}", help=f"override the {key.replace('-', '_')} path")
-    run.add_argument("--provider", dest="kind")
-    run.add_argument("--api-key-env")
-    run.add_argument("--model")
+    run.add_argument("--model", metavar="NAME",
+                     help="a [models.<name>] entry of the TOML file. "
+                          "Default: the default key, or the only entry.")
     run.add_argument("--effort")
     run.add_argument("--timeout-min", type=int)
     run.add_argument("--max-usd", type=float)
@@ -88,8 +88,6 @@ def _run(args) -> int:
 
     overrides = {
         "name": args.name or args.template.stem,
-        "kind": args.kind,
-        "api_key_env": args.api_key_env,
         "model": args.model,
         "effort": args.effort,
         "timeout_min": args.timeout_min,
@@ -103,7 +101,12 @@ def _run(args) -> int:
         "add_dirs": args.add_dir or None,
         "skills": _skills(args.skill) or None,
     }
-    settings = load(config_path, overrides=overrides, env=os.environ)
+    settings = load(
+        config_path,
+        overrides=overrides,
+        env=os.environ,
+        resolve_key=not args.render_only,
+    )
     values = _values(args.values, args.value)
     schemas = _schemas(args.schema)
 
@@ -122,10 +125,10 @@ def _run(args) -> int:
         if settings.step.max_usd is not None
         else "no cost limit"
     )
-    print(
-        f"{settings.step.name}: {settings.step.model}, "
-        f"effort {settings.step.effort}, {limit}"
-    )
+    model = settings.step.model
+    if settings.step.model_entry:
+        model = f"{settings.step.model_entry} ({model})"
+    print(f"{settings.step.name}: {model}, effort {settings.step.effort}, {limit}")
     record = run_step(
         settings.step,
         settings.provider,
