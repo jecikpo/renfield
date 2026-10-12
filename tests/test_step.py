@@ -499,3 +499,56 @@ def test_a_ctrl_c_while_the_child_runs_leaves_an_interrupted_record(tmp_path):
             f"the child {child} outlived the Ctrl-C: an escape orphaned a "
             f"paid child"
         )
+
+
+# --- the encodings ---
+
+def test_the_child_pipes_are_utf8_whatever_the_locale(tmp_path, monkeypatch):
+    """The child's pipes must not take the locale encoding. Measured under
+    LC_ALL=en_US.ISO8859-1: the prompt "café ... go → now" reached the child
+    as invalid UTF-8 with the arrow replaced by "?", and the step still
+    reported ok. A test cannot change this interpreter's locale, so it pins
+    the keyword that fixes it."""
+    seen = {}
+    real = subprocess.Popen
+
+    def spy(*args, **kwargs):
+        seen.update(kwargs)
+        return real(*args, **kwargs)
+
+    monkeypatch.setattr("renfield.step.subprocess.Popen", spy)
+    call(tmp_path, fake_claude(tmp_path, stream=SUCCESS))
+    assert seen["encoding"] == "utf-8"
+    assert seen["errors"] == "replace"
+
+
+def test_a_non_ascii_prompt_reaches_the_child_byte_for_byte(tmp_path):
+    """What the child receives must equal the prompt file that the record
+    points at: the README calls that file "the prompt, as sent"."""
+    template = tmp_path / "t.md"
+    template.write_text("review the café plan: $plan\n", encoding="utf-8")
+    seen = tmp_path / "stdin.bin"
+    program = tmp_path / "echo-stdin"
+    program.write_text(
+        "#!/usr/bin/env python3\n"
+        "import sys\n"
+        f"open({str(seen)!r}, 'wb').write(sys.stdin.buffer.read())\n"
+        f"sys.stdout.write({json.dumps(SUCCESS)})\n"
+    )
+    program.chmod(0o755)
+
+    record = run_step(
+        a_step(),
+        Provider(kind="subscription"),
+        workdir=tmp_path,
+        template=template,
+        values={"plan": "go → now"},
+        paths=Paths(run_dir=str(tmp_path / "out")),
+        executable=str(program),
+        parent_env={"PATH": "/usr/bin:/bin"},
+    )
+
+    assert record.status == "ok"
+    on_disk = (tmp_path / "out" / "prompts" / "review.md").read_bytes()
+    assert seen.read_bytes() == on_disk
+    seen.read_bytes().decode("utf-8")   # must not raise

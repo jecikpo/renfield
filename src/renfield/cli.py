@@ -105,9 +105,9 @@ def _run(args) -> int:
         run = render_paths(settings.paths, step=settings.step.name)
         make_dirs(run)
         text = render_prompt(
-            args.template.read_text(), values, settings.step.skills
+            args.template.read_text(encoding="utf-8"), values, settings.step.skills
         )
-        run.prompt.write_text(text)
+        run.prompt.write_text(text, encoding="utf-8")
         print(f"prompt: {run.prompt}")
         return EXIT_OK
 

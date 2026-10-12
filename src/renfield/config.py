@@ -131,7 +131,8 @@ def _read(path: Path | None) -> dict:
     if not path.is_file():
         raise ConfigError(f"the file {path} is not there")
     try:
-        data = tomllib.loads(path.read_text())
+        with path.open("rb") as handle:
+            data = tomllib.load(handle)
     except tomllib.TOMLDecodeError as error:
         raise ConfigError(f"{path} is not valid TOML: {error}") from error
 

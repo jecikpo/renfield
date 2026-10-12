@@ -40,7 +40,7 @@ def _first_problem(
         if not path.is_file():
             return f"the agent did not write {name}"
         try:
-            text = path.read_text().strip()
+            text = path.read_text(encoding="utf-8").strip()
         except (OSError, UnicodeDecodeError) as error:
             return f"{name} cannot be read: {error}"
         if not text:
@@ -83,7 +83,7 @@ def _first_problem(
 
 @lru_cache(maxsize=None)
 def _schema(path: str) -> dict:
-    return json.loads(Path(path).read_text())
+    return json.loads(Path(path).read_text(encoding="utf-8"))
 
 
 def _validate(data: Any, schema: dict) -> str | None:
