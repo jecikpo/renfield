@@ -1107,7 +1107,10 @@ def test_a_number_outside_its_range_names_the_key_the_range_and_the_value(
         load(write(tmp_path, text), env={})
     message = str(caught.value)
     assert key in message
-    assert str(value) in message
+    # Not `str(value) in message`: for timeout_min=0 the "240" of the range
+    # satisfies that, so the assertion would pass if the message dropped the
+    # value. Measured.
+    assert f"the value is {value}" in message
     assert " to " in message, "the message must name the range"
 
 
@@ -1384,6 +1387,11 @@ def _in_range(key: str, value: Any, limits: tuple, kind) -> Any:
         raise ConfigError(
             f"{key}: the range is {low} to {high}, and the value is {value}"
         )
+    if kind is int and value != int(value):
+        # `int(30.9)` is 30, so without this the program would use a value
+        # that the person did not write, and say nothing. A float that is
+        # exactly whole, such as 30.0, is still accepted.
+        raise ConfigError(f"{key}: the value {value} is not a whole number")
     return kind(value)
 ```
 
@@ -3094,6 +3102,9 @@ reviewer who finds the fix must not read it as an accident.
 | 8 | Task 2's auth test ran `json.loads` on every non-blank line of `auth-401.jsonl`, and line 1 of that fixture is a plain-text warning of the child. The test could not run. Found by the task 2 implementer. | The list comprehension keeps only the lines that start with `{`. `raw` still carries the warning line into `read_stream`. |
 | 9 | `paths.py` let a bare `ValueError` out of `Formatter().parse` for an unbalanced brace, and task 9's CLI catches `PathError` only. `renfield run --run-dir "runs/{step"` would have printed a traceback. Found by the task 4 implementer, measured by the controller. | `_check` wraps the comprehension and raises `PathError` naming the key and the reason. 3 forms get a test. |
 | 10 | The defect 9 fix guarded `Formatter().parse` and left `.format` open to the same leak. `"runs/{step!x}"` and `"runs/{step:d}"` both raise a bare `ValueError`. Found by the task 4 reviewer, measured by the controller. | `render` wraps the `.format` call too, and 2 more forms get a test. |
+| 11 | `_in_range` ended with `return kind(value)`, so `timeout_min = 30.9` passed the range check and became 30, with no message. The module exists to stop exactly that. Found by the task 5 reviewer, measured by the controller. | A whole-number check for the `int` keys. `30.0` still passes. |
+| 12 | Task 5's range test asserted `str(value) in message`, which the `240` of the range satisfies for `timeout_min = 0`. 3 of its 6 cases passed whatever the code printed. Found by the task 5 reviewer, measured by the controller. | The assertion is the exact phrase `f"the value is {value}"`. |
+| 13 | Task 5 had no test that an in-range boundary is accepted, so changing `<=` to `<` would have left the suite green. It also had no test for an out-of-range override, a non-number value, or an unknown `kind`. Found by the task 5 reviewer. | 5 added tests: both ends of all 3 ranges, an override, a bool and a string, an unknown kind, and both fraction cases. |
 
 **Spec coverage.** Each section of `docs/design.md` has a task: section 3 is
 tasks 3 and 8, section 4 is tasks 5, 7 and 8, section 5 is tasks 4 and 5,
