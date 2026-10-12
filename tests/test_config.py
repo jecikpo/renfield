@@ -255,6 +255,8 @@ def by_hand(**changes):
         ("max_usd", 1001.0),
         ("add_dirs", ["not-a-path"]),
         ("skills", ["not-a-skill"]),
+        ("model_entry", "Bad Name"),
+        ("model_entry", "a.b"),
     ],
 )
 def test_a_step_built_by_hand_is_checked_and_names_the_key(key, value):
@@ -267,3 +269,8 @@ def test_a_step_built_by_hand_is_checked_and_names_the_key(key, value):
 def test_a_good_step_built_by_hand_is_accepted():
     step = by_hand(max_usd=1.0, add_dirs=[Path("a")], skills=[Skill(plugin=Path("p"))])
     assert step.timeout_min == 20
+
+
+def test_a_step_built_by_hand_has_no_model_entry_unless_given():
+    assert by_hand().model_entry is None
+    assert by_hand(model_entry="flash").model_entry == "flash"

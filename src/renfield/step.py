@@ -104,6 +104,7 @@ def run_step(
         provider=provider.kind,
         model=step.model,
         effort=step.effort,
+        model_entry=step.model_entry,
         cost_estimated=estimated(provider.kind),
         run_dir=str(run.run_dir),
         prompt=str(run.prompt.relative_to(run.run_dir)),

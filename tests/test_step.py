@@ -127,6 +127,22 @@ def test_the_child_runs_in_the_working_directory(tmp_path):
     assert call_record(tmp_path)["cwd"] == str(workdir)
 
 
+def test_the_record_names_the_model_entry(tmp_path):
+    record = call(
+        tmp_path, fake_claude(tmp_path, stream=SUCCESS),
+        step=a_step(model_entry="flash"),
+    )
+    assert record.model_entry == "flash"
+    data = json.loads((tmp_path / "out" / "record.json").read_text())
+    assert data["model_entry"] == "flash"
+    assert data["model"] == "m", "model keeps the raw ID"
+
+
+def test_a_step_with_no_model_entry_records_none(tmp_path):
+    record = call(tmp_path, fake_claude(tmp_path, stream=SUCCESS))
+    assert record.model_entry is None
+
+
 # --- the prompt ---
 
 def test_a_missing_value_stops_the_call_and_names_the_placeholder(tmp_path):

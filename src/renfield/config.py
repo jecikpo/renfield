@@ -24,6 +24,10 @@ TIMEOUT_RANGE = (1, 240)
 MAX_USD_RANGE = (0.01, 1000.0)
 RETRIES_RANGE = (0, 2)
 NAME_PATTERN = re.compile(r"^[a-z0-9._-]{1,64}$")
+# An entry name has no dot: TOML reads [models.a.b] as the entry a with a
+# nested table b.
+ENTRY_PATTERN = re.compile(r"^[a-z0-9_-]{1,64}$")
+ENTRY_RULE = "1 to 64 characters of a-z, 0-9, '-', and '_'"
 
 PROVIDER_KEYS = ("kind", "model", "effort", "api_key", "api_key_env", "base_url")
 STEP_KEYS = ("timeout_min", "max_usd", "retries")
@@ -51,6 +55,7 @@ class Step:
     retries: int = 2
     add_dirs: list[Path] = field(default_factory=list)
     skills: list[Skill] = field(default_factory=list)
+    model_entry: str | None = None
 
     def __post_init__(self) -> None:
         """Check every key here, so a caller that builds a Step by hand gets
@@ -74,6 +79,13 @@ class Step:
         for skill in self.skills:
             if not isinstance(skill, Skill):
                 raise ConfigError(f"skills: {skill!r} is not a Skill")
+        if self.model_entry is not None and not (
+            isinstance(self.model_entry, str)
+            and ENTRY_PATTERN.fullmatch(self.model_entry)
+        ):
+            raise ConfigError(
+                f"model_entry: the value {self.model_entry!r} is not {ENTRY_RULE}"
+            )
 
 
 @dataclass

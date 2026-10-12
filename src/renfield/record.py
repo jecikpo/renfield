@@ -25,6 +25,7 @@ class StepRecord:
     provider: str | None = None
     model: str | None = None
     effort: str | None = None
+    model_entry: str | None = None          # the [models.<name>] of the file
     attempts: int = 0
     cost_usd: float = 0.0
     # False when the call was killed and wrote no result event. The cost is
