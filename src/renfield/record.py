@@ -48,6 +48,9 @@ class StepRecord:
     # be true for a step that failed: a limit can arrive after the agent wrote
     # a complete file.
     outputs_valid: bool = False
+    # The exit code of the child. -9 says that SIGKILL ended it, and the cost
+    # of that call is lost.
+    child_exit_code: int | None = None
 
 
 def estimated(kind: str) -> bool:
