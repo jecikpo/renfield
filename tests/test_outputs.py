@@ -138,7 +138,7 @@ def test_a_schema_that_is_not_utf8_gives_a_reason_and_does_not_raise(tmp_path):
         ("bogus-type", '{"type": "bogus"}'),
         ("list", "[1, 2, 3]"),
         ("string", '"hello"'),
-        ("bad-ref", '{"$ref": "http://nope.invalid/x#"}'),
+        ("bad-ref", '{"$ref": "#/definitions/missing"}'),
     ],
 )
 def test_a_schema_that_is_not_usable_gives_a_reason_and_does_not_raise(
@@ -147,7 +147,8 @@ def test_a_schema_that_is_not_usable_gives_a_reason_and_does_not_raise(
     """Measured: these 4 raise UnknownType, AttributeError, AttributeError and
     a referencing error. check_outputs promises a reason, and run_step calls
     it after the agent is paid for. Each case needs its own schema file,
-    because _schema is cached by path."""
+    because _schema is cached by path. The ref is a local pointer and not a
+    URL: a URL makes a real DNS lookup, and no test here uses the network."""
     (tmp_path / "verdict.json").write_text('{"a": 1}')
     schema = tmp_path / f"{name}.schema.json"
     schema.write_text(text)
