@@ -1620,7 +1620,10 @@ def _first_problem(
             continue
         try:
             data = json.loads(text)
-        except json.JSONDecodeError as error:
+        except (ValueError, RecursionError) as error:
+            # A JSONDecodeError is already a ValueError. Measured: an output
+            # of "["*100000 raises RecursionError, and one of "1"*5000 raises
+            # a plain ValueError over the 4300-digit limit.
             return f"{name} is not valid JSON: {error}"
 
         schema_path = schemas.get(name)
@@ -1632,7 +1635,17 @@ def _first_problem(
             # UnicodeDecodeError is a ValueError and not an OSError.
             return f"the schema {schema_path} cannot be read: {error}"
 
-        problem = _validate(data, schema)
+        try:
+            problem = _validate(data, schema)
+        except Exception as error:
+            # A malformed schema raises from inside jsonschema, and the type
+            # varies: measured UnknownType, AttributeError twice and a
+            # referencing error from 4 bad schemas. This function must return
+            # a reason, so the guard is wide and the message names the class.
+            return (
+                f"the schema {schema_path} is not usable: "
+                f"{error.__class__.__name__}: {error}"
+            )
         if problem is not None:
             return f"{name}: {problem}"
     return None
@@ -3135,6 +3148,8 @@ reviewer who finds the fix must not read it as an accident.
 | 12 | Task 5's range test asserted `str(value) in message`, which the `240` of the range satisfies for `timeout_min = 0`. 3 of its 6 cases passed whatever the code printed. Found by the task 5 reviewer, measured by the controller. | The assertion is the exact phrase `f"the value is {value}"`. |
 | 13 | Task 5 had no test that an in-range boundary is accepted, so changing `<=` to `<` would have left the suite green. It also had no test for an out-of-range override, a non-number value, or an unknown `kind`. Found by the task 5 reviewer. | 5 added tests: both ends of all 3 ranges, an override, a bool and a string, an unknown kind, and both fraction cases. |
 | 14 | `check_outputs` is declared `-> tuple[bool, str | None]` and leaked `UnicodeDecodeError` from `read_text`. `run_step` calls it after the agent is paid for, so the record would never be written. The schema read had the same gap, because `UnicodeDecodeError` is a `ValueError` and not an `OSError`. Found by the task 6 implementer, measured by the controller. | Both reads are guarded and return a reason. 2 tests. |
+| 15 | 2 more paths of `check_outputs` raised instead of returning a reason. 4 malformed schemas gave 4 unrelated exception types from inside jsonschema, and `json.loads` gave `RecursionError` for deep nesting and a plain `ValueError` over the 4300-digit integer limit. Found by the task 6 reviewer, measured by the controller. | A wide guard around `_validate`, and `(ValueError, RecursionError)` on the parse. 6 tests. |
+| 16 | The test the controller wrote for the defect 15 schema case used `{"$ref": "http://nope.invalid/x#"}`, which makes a real DNS lookup and breaks the global constraint "No test uses the network". Found by the task 6 implementer, who kept the text and reported it. | A local pointer, `{"$ref": "#/definitions/missing"}`, measured to reach the same guard offline. |
 
 **Spec coverage.** Each section of `docs/design.md` has a task: section 3 is
 tasks 3 and 8, section 4 is tasks 5, 7 and 8, section 5 is tasks 4 and 5,
