@@ -11,7 +11,7 @@ directory, and the list of outputs.
 ## Commands
 
 ```sh
-uv run pytest                          # 256 tests. No LLM, no network, no money.
+uv run pytest                          # 263 tests. No LLM, no network, no money.
 uv run renfield run --help
 uv run renfield run --template T --value k=v --render-only   # 0 USD. It writes the prompt and stops.
 ```
@@ -110,7 +110,7 @@ caller must never retry a 5.
    locale. A UTF-8 file becomes double-encoded text inside a paid prompt, and
    the status still reports `ok`. The fix is `encoding="utf-8"`.
 
-**Renfield has never run a real agent.** Each of the 256 tests uses
+**Renfield has never run a real agent.** Each of the 263 tests uses
 `fake_claude`. The first paid call is not yet measured. Write what it reports
 into `docs/design.md`, with the date.
 
