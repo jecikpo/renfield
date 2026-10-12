@@ -1,6 +1,7 @@
 import json
 import os
 import signal
+import subprocess
 import sys
 import time
 from pathlib import Path
@@ -377,3 +378,106 @@ def test_a_grandchild_of_the_child_is_killed_too(tmp_path):
             f"the grandchild {grandchild} outlived the child: the signal went "
             f"to the child and not to its process group"
         )
+
+
+def test_a_fault_while_the_child_runs_leaves_a_crashed_record(tmp_path, monkeypatch):
+    """A directory where the transcript file belongs makes open("a") raise
+    IsADirectoryError while the child is still alive. The child must be
+    stopped and a record must survive, because the call may already have
+    been paid for."""
+    out = tmp_path / "out"
+    (out / "transcripts" / "review.jsonl").mkdir(parents=True)
+    program = fake_claude(tmp_path, stream=SUCCESS, sleep_s=30)
+    # The fault comes at once, before the fake writes call.json, so the pid
+    # is taken from the Popen call. Measured: call_record is absent here.
+    pids = []
+    real_popen = subprocess.Popen
+
+    def spy(*args, **kwargs):
+        process = real_popen(*args, **kwargs)
+        pids.append(process.pid)
+        return process
+
+    monkeypatch.setattr("renfield.step.subprocess.Popen", spy)
+
+    with pytest.raises(OSError):
+        run_step(
+            a_step(),
+            Provider(kind="subscription"),
+            workdir=tmp_path,
+            template=template_of(tmp_path),
+            values={"plan": "docs/plan.md"},
+            paths=Paths(run_dir=str(out)),
+            executable=str(program),
+            parent_env={"PATH": "/usr/bin:/bin"},
+            grace_s=0.5,
+        )
+
+    data = json.loads((out / "record.json").read_text())
+    assert data["error_class"] == "crashed"
+    assert data["cost_known"] is False
+    assert "IsADirectoryError" in data["error"]
+
+    child = pids[0]
+    deadline = time.monotonic() + 5.0
+    while time.monotonic() < deadline:
+        try:
+            os.kill(child, 0)
+        except ProcessLookupError:
+            break
+        time.sleep(0.05)
+    else:
+        os.kill(child, signal.SIGKILL)
+        raise AssertionError(
+            f"the child {child} outlived the fault: an escape orphaned a "
+            f"paid child"
+        )
+
+
+def test_a_ctrl_c_while_the_child_runs_leaves_an_interrupted_record(tmp_path):
+    """on_line raising KeyboardInterrupt is what Ctrl-C does to the parent
+    while it reads the stream. The record must survive, with the cost marked
+    unknown: the child is in its own session, so the terminal's SIGINT never
+    reached it, and Renfield cannot recover what the call cost. This is also
+    the first test that drives on_line, _console and describe_event."""
+    tool = json.dumps(
+        {
+            "type": "assistant",
+            "message": {
+                "content": [
+                    {
+                        "type": "tool_use",
+                        "name": "Read",
+                        "input": {"file_path": "/a/plan.md"},
+                    }
+                ]
+            },
+        }
+    )
+    program = fake_claude(tmp_path, stream=tool + "\n" + SUCCESS)
+    out = tmp_path / "out"
+    seen = []
+
+    def on_line(line):
+        seen.append(line)
+        raise KeyboardInterrupt
+
+    with pytest.raises(KeyboardInterrupt):
+        run_step(
+            a_step(),
+            Provider(kind="subscription"),
+            workdir=tmp_path,
+            template=template_of(tmp_path),
+            values={"plan": "docs/plan.md"},
+            paths=Paths(run_dir=str(out)),
+            executable=str(program),
+            parent_env={"PATH": "/usr/bin:/bin"},
+            on_line=on_line,
+            grace_s=0.5,
+        )
+
+    assert seen == ["Read(plan.md)"], "on_line must receive the tool call line"
+    data = json.loads((out / "record.json").read_text())
+    assert data["error_class"] == "interrupted"
+    assert data["cost_known"] is False
+    assert data["unknown_usd"] is None
