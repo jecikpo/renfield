@@ -1,0 +1,12 @@
+__pycache__/
+*.egg-info/
+.venv/
+.pytest_cache/
+.ruff_cache/
+dist/
+
+# A run folder holds prompts, transcripts, and the files an agent wrote.
+runs/
+
+# The input file can hold a key.
+renfield.toml
