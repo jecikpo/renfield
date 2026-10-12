@@ -174,3 +174,22 @@ def test_a_json_output_with_a_huge_integer_gives_a_reason(tmp_path):
     ok, reason = check_outputs(tmp_path, ["verdict.json"], {})
     assert ok is False
     assert "verdict.json" in reason
+
+
+@pytest.mark.parametrize(
+    "name,text", [("huge-int", "1" * 5000), ("deep", "[" * 100000)]
+)
+def test_a_schema_file_that_cannot_be_parsed_gives_a_reason(tmp_path, name, text):
+    """Measured: a schema of "1"*5000 raises a plain ValueError over the
+    4300-digit limit, and one of "["*100000 raises RecursionError. Neither is
+    a JSONDecodeError, so the earlier tuple missed both. Each case needs its
+    own schema file, because _schema is cached by path."""
+    (tmp_path / "verdict.json").write_text('{"a": 1}')
+    schema = tmp_path / f"{name}.schema.json"
+    schema.write_text(text)
+    ok, reason = check_outputs(
+        tmp_path, ["verdict.json"], {"verdict.json": schema}
+    )
+    assert ok is False
+    assert "cannot be read" in reason
+    assert name in reason

@@ -58,7 +58,11 @@ def _first_problem(
             continue
         try:
             schema = _schema(str(schema_path))
-        except (OSError, UnicodeDecodeError, json.JSONDecodeError) as error:
+        except (OSError, ValueError, RecursionError) as error:
+            # ValueError covers UnicodeDecodeError and JSONDecodeError, which
+            # the earlier tuple named one at a time. Measured: a schema file
+            # of "1"*5000 raises a plain ValueError over the 4300-digit
+            # limit, and one of "["*100000 raises RecursionError.
             return f"the schema {schema_path} cannot be read: {error}"
 
         try:
