@@ -406,6 +406,15 @@ Measured on 2026-09-16: a call on `meta-llama/llama-3.1-8b-instruct` reported
 0.3141 USD. OpenRouter charges about 0.002 USD for it. A DeepSeek run reported
 6.16 USD.
 
+**Where those runs are recorded.** This repository holds no run of its own.
+The 3 values come from the project that Renfield was extracted from, in its
+`docs/MODELS.md`, section 7, "Facts about the providers, not about the
+models", at commit `36254b2` of 2026-09-25. Fact 1 of that section gives the
+8B figures. The DeepSeek section gives 6.163015 USD and 6.793301 USD for 2
+runs of the same target. **A person who needs to check these numbers must
+read that document, and a person who changes a provider should measure
+again.**
+
 **2 consequences:**
 
 1. With `openrouter`, `max_usd` is a turn governor in disguise. It is not a
