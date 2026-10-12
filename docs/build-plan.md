@@ -1631,8 +1631,11 @@ def _first_problem(
             continue
         try:
             schema = _schema(str(schema_path))
-        except (OSError, UnicodeDecodeError, json.JSONDecodeError) as error:
-            # UnicodeDecodeError is a ValueError and not an OSError.
+        except (OSError, ValueError, RecursionError) as error:
+            # ValueError covers UnicodeDecodeError and JSONDecodeError.
+            # Measured: a schema file of "1"*5000 raises a plain ValueError
+            # over the 4300-digit limit, and one of "["*100000 raises
+            # RecursionError.
             return f"the schema {schema_path} cannot be read: {error}"
 
         try:
@@ -3150,6 +3153,7 @@ reviewer who finds the fix must not read it as an accident.
 | 14 | `check_outputs` is declared `-> tuple[bool, str | None]` and leaked `UnicodeDecodeError` from `read_text`. `run_step` calls it after the agent is paid for, so the record would never be written. The schema read had the same gap, because `UnicodeDecodeError` is a `ValueError` and not an `OSError`. Found by the task 6 implementer, measured by the controller. | Both reads are guarded and return a reason. 2 tests. |
 | 15 | 2 more paths of `check_outputs` raised instead of returning a reason. 4 malformed schemas gave 4 unrelated exception types from inside jsonschema, and `json.loads` gave `RecursionError` for deep nesting and a plain `ValueError` over the 4300-digit integer limit. Found by the task 6 reviewer, measured by the controller. | A wide guard around `_validate`, and `(ValueError, RecursionError)` on the parse. 6 tests. |
 | 16 | The test the controller wrote for the defect 15 schema case used `{"$ref": "http://nope.invalid/x#"}`, which makes a real DNS lookup and breaks the global constraint "No test uses the network". Found by the task 6 implementer, who kept the text and reported it. | A local pointer, `{"$ref": "#/definitions/missing"}`, measured to reach the same guard offline. |
+| 17 | The defect 15 fix closed the validate path and left the **schema file read** open to the same 2 classes. A schema file of `"1"*5000` leaks `ValueError` and one of `"["*100000` leaks `RecursionError`. Found by the task 6 re-reviewer, measured by the controller. | The schema tuple becomes `(OSError, ValueError, RecursionError)`. 2 tests. |
 
 **Spec coverage.** Each section of `docs/design.md` has a task: section 3 is
 tasks 3 and 8, section 4 is tasks 5, 7 and 8, section 5 is tasks 4 and 5,
