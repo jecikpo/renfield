@@ -275,3 +275,59 @@ def test_a_failed_step_that_wrote_a_good_file_says_so(tmp_path):
     assert record.status == "failed"
     assert record.error_class == "auth", "the failure keeps its own class"
     assert record.outputs_valid is True
+
+
+# --- fix round 1 ---
+
+def test_a_child_that_writes_invalid_utf8_keeps_the_events_before_it(tmp_path):
+    """Measured: text=True alone raises UnicodeDecodeError while the stream is
+    read, and the valid events before the bad bytes are lost with it.
+    errors="replace" keeps them and read_stream ignores the bad line."""
+    program = tmp_path / "bad-bytes"
+    program.write_text(
+        "#!/usr/bin/env python3\n"
+        "import sys\n"
+        "sys.stdin.read()\n"
+        f"sys.stdout.write({json.dumps(SUCCESS)})\n"
+        "sys.stdout.flush()\n"
+        "sys.stdout.buffer.write(b'\\xff\\xfe bad\\n')\n"
+    )
+    program.chmod(0o755)
+    record = call(tmp_path, program)
+    assert record.status == "ok"
+    assert record.cost_usd == 1.25
+    transcript = (tmp_path / "out" / "transcripts" / "review.jsonl").read_text()
+    assert "�" in transcript, "the bad bytes reach the transcript as U+FFFD"
+
+
+def test_a_child_that_exits_before_it_reads_the_prompt_gives_a_record(tmp_path):
+    """Measured: a 500000-character prompt fills the pipe buffer, and the
+    write then raises BrokenPipeError when the child has already exited.
+    run_step is called after the agent may already have been paid for, so it
+    must return a record rather than raise."""
+    program = tmp_path / "quick-exit"
+    program.write_text("#!/usr/bin/env python3\nimport sys\nsys.exit(0)\n")
+    program.chmod(0o755)
+    record = call(
+        tmp_path, program, step=a_step(retries=0), values={"plan": "A" * 500000}
+    )
+    assert record.status == "failed"
+    assert record.error_class == "transient"
+    assert record.attempts == 1
+
+
+def test_the_watchdog_does_not_call_a_finished_call_a_timeout():
+    """The timer can fire between the end of the stream and the cancel. A
+    child that already exited must not be relabelled as a timeout. This
+    reaches a private function on purpose: the race cannot be driven from
+    run_step without making the test depend on timing."""
+    import subprocess
+    import threading
+
+    from renfield.step import _kill_group
+
+    done = subprocess.Popen(["/usr/bin/true"], start_new_session=True)
+    done.wait()
+    flag = threading.Event()
+    _kill_group(done, flag, 0.1)
+    assert not flag.is_set()

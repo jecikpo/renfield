@@ -220,6 +220,7 @@ def _run_once(
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
         text=True,
+        errors="replace",
         bufsize=1,
         start_new_session=True,
     )
@@ -231,8 +232,15 @@ def _run_once(
     watchdog.start()
     try:
         assert process.stdin is not None and process.stdout is not None
-        process.stdin.write(prompt)
-        process.stdin.close()
+        try:
+            process.stdin.write(prompt)
+            process.stdin.close()
+        except (BrokenPipeError, OSError):
+            # The child exited before it read the prompt. Its own output, or
+            # the absence of a result event, carries the reason. Measured: a
+            # 500000-character prompt fills the pipe buffer and the write
+            # then raises.
+            pass
         with transcript_path.open("a") as transcript:
             result = read_stream(
                 _lines(process.stdout, transcript),
@@ -283,6 +291,11 @@ def _kill_group(
     the cost of the call. SIGKILL cannot be caught, so it loses that cost. A
     child that does not stop in `grace_s` seconds gets SIGKILL.
     """
+    if process.poll() is not None:
+        # The child finished on its own, between the end of its stream and
+        # the cancel of this timer. That is not a timeout, and a call that
+        # succeeded must not be relabelled as one.
+        return
     timed_out.set()
     _signal(process, signal.SIGINT)
     end = time.monotonic() + grace_s
