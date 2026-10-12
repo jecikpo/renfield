@@ -13,7 +13,7 @@ import json
 from collections import Counter
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Callable, Iterable
+from typing import Any, Callable, Iterable, Mapping
 
 # The argument of each tool that goes into the console line.
 TOOL_ARGUMENT = {
@@ -84,7 +84,7 @@ def read_stream(
         if on_event is not None:
             on_event(event)
         if event.get("subtype") == "thinking_tokens":
-            thinking = max(thinking, int(event.get("estimated_tokens") or 0))
+            thinking = max(thinking, _number(event, "estimated_tokens", int, 0))
         if event.get("type") == "result":
             result_event = event
 
@@ -106,23 +106,40 @@ def read_stream(
             thinking_tokens=thinking,
         )
 
-    usage = result_event.get("usage") or {}
+    usage = result_event.get("usage")
+    if not isinstance(usage, Mapping):
+        usage = {}
     error_class = _error_class(result_event)
     return StepResult(
         ok=error_class is None,
         error_class=error_class,
         error=None if error_class is None else _error_text(result_event),
-        cost_usd=float(result_event.get("total_cost_usd") or 0.0),
-        input_tokens=int(usage.get("input_tokens") or 0),
-        output_tokens=int(usage.get("output_tokens") or 0),
-        cache_read_tokens=int(usage.get("cache_read_input_tokens") or 0),
-        cache_write_tokens=int(usage.get("cache_creation_input_tokens") or 0),
-        num_turns=int(result_event.get("num_turns") or 0),
-        duration_s=float(result_event.get("duration_ms") or 0) / 1000.0,
+        cost_usd=_number(result_event, "total_cost_usd", float, 0.0),
+        input_tokens=_number(usage, "input_tokens", int, 0),
+        output_tokens=_number(usage, "output_tokens", int, 0),
+        cache_read_tokens=_number(usage, "cache_read_input_tokens", int, 0),
+        cache_write_tokens=_number(usage, "cache_creation_input_tokens", int, 0),
+        num_turns=_number(result_event, "num_turns", int, 0),
+        duration_s=_number(result_event, "duration_ms", float, 0.0) / 1000.0,
         session_id=result_event.get("session_id"),
         tool_calls=dict(tools),
         thinking_tokens=thinking,
     )
+
+
+def _number(source: Mapping[str, Any], key: str, kind, default):
+    """Read a number the provider sent, or give the default.
+
+    This module is a reader over JSON that the provider controls. A field
+    with an unexpected type must not raise: run_step calls this after the
+    agent has been paid for, and a raise here discards the cost that the
+    same event carries. Measured: a result event with
+    `"num_turns": "many"` raised ValueError and lost 2.50 USD.
+    """
+    try:
+        return kind(source.get(key) or default)
+    except (TypeError, ValueError, OverflowError):
+        return default
 
 
 def describe_event(event: dict[str, Any]) -> str | None:

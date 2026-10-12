@@ -105,3 +105,22 @@ def test_a_long_argument_is_cut_and_marked():
     line = describe_event(call)
     assert len(line) < 80
     assert line.endswith("…)")
+
+
+def test_a_field_with_an_unexpected_type_does_not_lose_the_cost():
+    """Measured: a result event with "num_turns": "many" raised ValueError
+    in read_stream, and run_step recorded cost_usd 0.0 for an event that
+    held 2.5 USD."""
+    event = {"type": "result", "subtype": "success", "is_error": False,
+             "total_cost_usd": 2.5, "num_turns": "many",
+             "usage": "none", "duration_ms": [1]}
+    result = read_stream([json.dumps(event) + "\n"])
+    assert result.cost_usd == 2.5
+    assert result.num_turns == 0
+    assert result.input_tokens == 0
+    assert result.duration_s == 0.0
+
+
+def test_a_thinking_event_with_a_bad_estimate_does_not_raise():
+    lines = [json.dumps({"subtype": "thinking_tokens", "estimated_tokens": "x"}) + "\n"]
+    assert read_stream(lines).thinking_tokens == 0
