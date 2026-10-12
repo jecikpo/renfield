@@ -1,4 +1,8 @@
 import json
+import os
+import signal
+import sys
+import time
 from pathlib import Path
 
 import pytest
@@ -326,8 +330,50 @@ def test_the_watchdog_does_not_call_a_finished_call_a_timeout():
 
     from renfield.step import _kill_group
 
-    done = subprocess.Popen(["/usr/bin/true"], start_new_session=True)
+    done = subprocess.Popen([sys.executable, "-c", ""], start_new_session=True)
     done.wait()
     flag = threading.Event()
     _kill_group(done, flag, 0.1)
     assert not flag.is_set()
+
+
+def test_a_grandchild_of_the_child_is_killed_too(tmp_path):
+    """Behaviour 1: the signal goes to the process group. Without it, a
+    `sleep` the child started keeps running, and for a real agent that is a
+    subagent or a compiler that keeps costing money. This is the only test
+    that fails if os.killpg becomes os.kill. The grandchild closes its
+    standard output: if it kept the pipe, the read of the parent would wait
+    for it and hide the leak (measured: the test passed after
+    30 s with os.kill, once the grandchild ended by itself)."""
+    pid_file = tmp_path / "grandchild.pid"
+    program = tmp_path / "with-grandchild"
+    program.write_text(
+        "#!/usr/bin/env python3\n"
+        "import signal, subprocess, sys, time\n"
+        "signal.signal(signal.SIGINT, signal.SIG_IGN)\n"
+        "kid = subprocess.Popen(['sleep', '30'], stdout=subprocess.DEVNULL,"
+        " stderr=subprocess.DEVNULL)\n"
+        f"open({str(pid_file)!r}, 'w').write(str(kid.pid))\n"
+        "sys.stdin.read()\n"
+        "time.sleep(30)\n"
+    )
+    program.chmod(0o755)
+
+    record = call(tmp_path, program, timeout_s=1.5, grace_s=0.5)
+
+    assert record.error_class == "timeout"
+    assert record.child_exit_code == -9
+    grandchild = int(pid_file.read_text())
+    deadline = time.monotonic() + 5.0
+    while time.monotonic() < deadline:
+        try:
+            os.kill(grandchild, 0)
+        except ProcessLookupError:
+            break
+        time.sleep(0.05)
+    else:
+        os.kill(grandchild, signal.SIGKILL)
+        raise AssertionError(
+            f"the grandchild {grandchild} outlived the child: the signal went "
+            f"to the child and not to its process group"
+        )

@@ -93,8 +93,10 @@ def run_step(
     run = render_paths(paths, step=step.name)
     make_dirs(run)
 
-    prompt = render_prompt(template.read_text(), values, step.skills)
-    run.prompt.write_text(prompt)
+    prompt = render_prompt(
+        template.read_text(encoding="utf-8"), values, step.skills
+    )
+    run.prompt.write_text(prompt, encoding="utf-8")
 
     record = StepRecord(
         name=step.name,
@@ -113,35 +115,50 @@ def run_step(
     limit_s = timeout_s if timeout_s is not None else step.timeout_min * 60
     waits = RETRY_WAITS[: step.retries]
 
-    for attempt in range(1, len(waits) + 2):
-        record.attempts = attempt
-        result, child_exit_code = _run_once(
-            command,
-            prompt,
-            env=env,
-            workdir=Path(workdir),
-            transcript_path=run.transcript,
-            timeout_s=limit_s,
-            grace_s=grace_s,
-            on_line=on_line,
-        )
-        record.cost_usd += result.cost_usd
-        record.input_tokens = result.input_tokens
-        record.output_tokens = result.output_tokens
-        record.cache_read_tokens = result.cache_read_tokens
-        record.cache_write_tokens = result.cache_write_tokens
-        record.num_turns = result.num_turns
-        record.tool_calls = result.tool_calls
-        record.duration_s = result.duration_s
-        record.error_class = result.error_class
-        record.error = result.error
-        record.cost_known = result.cost_known
-        record.child_exit_code = child_exit_code
-        record.unknown_usd = None if result.cost_known else step.max_usd
+    try:
+        for attempt in range(1, len(waits) + 2):
+            record.attempts = attempt
+            result, child_exit_code = _run_once(
+                command,
+                prompt,
+                env=env,
+                workdir=Path(workdir),
+                transcript_path=run.transcript,
+                timeout_s=limit_s,
+                grace_s=grace_s,
+                on_line=on_line,
+            )
+            record.cost_usd += result.cost_usd
+            record.input_tokens = result.input_tokens
+            record.output_tokens = result.output_tokens
+            record.cache_read_tokens = result.cache_read_tokens
+            record.cache_write_tokens = result.cache_write_tokens
+            record.num_turns = result.num_turns
+            record.tool_calls = result.tool_calls
+            record.duration_s = result.duration_s
+            record.error_class = result.error_class
+            record.error = result.error
+            record.cost_known = result.cost_known
+            record.child_exit_code = child_exit_code
+            record.unknown_usd = None if result.cost_known else step.max_usd
 
-        if result.error_class != RETRY_CLASS or attempt == len(waits) + 1:
-            break
-        sleep(waits[attempt - 1])
+            if result.error_class != RETRY_CLASS or attempt == len(waits) + 1:
+                break
+            sleep(waits[attempt - 1])
+    except BaseException as error:
+        # The call may already have been paid for. A record that says the
+        # cost is unknown is worth more than a traceback with no record.
+        # Renfield cannot capture the cost here: the child is in its own
+        # session, so the terminal's SIGINT never reached it, and the parent
+        # stopped reading its stream.
+        record.error_class = (
+            "interrupted" if isinstance(error, KeyboardInterrupt) else "crashed"
+        )
+        record.error = f"{error.__class__.__name__}: {error}"
+        record.cost_known = False
+        record.unknown_usd = step.max_usd
+        write_record(run.record, record)
+        raise
 
     if not record.cost_known and record.error:
         limit = (
@@ -234,23 +251,32 @@ def _run_once(
         assert process.stdin is not None and process.stdout is not None
         try:
             process.stdin.write(prompt)
-            process.stdin.close()
         except (BrokenPipeError, OSError):
             # The child exited before it read the prompt. Its own output, or
             # the absence of a result event, carries the reason. Measured: a
             # 500000-character prompt fills the pipe buffer and the write
             # then raises.
             pass
-        with transcript_path.open("a") as transcript:
+        finally:
+            try:
+                process.stdin.close()
+            except OSError:
+                pass
+        with transcript_path.open(
+            "a", encoding="utf-8", errors="replace"
+        ) as transcript:
             result = read_stream(
                 _lines(process.stdout, transcript),
                 on_event=_console(on_line) if on_line else None,
             )
         process.wait()
-    except KeyboardInterrupt:
-        # Ctrl-C. Kill the child and wait for it, so that no paid call stays
-        # alive after the run stops.
-        _kill(process)
+    except BaseException:
+        # Any escape here leaves a child that is alive, in its own session,
+        # with no parent to stop it: the model keeps working and the call
+        # keeps paying. Reachable by an OSError from the transcript write, a
+        # malformed result event, or Ctrl-C. Escalate rather than SIGKILL, so
+        # the child can still answer and exit.
+        _kill_group(process, threading.Event(), grace_s)
         process.wait()
         raise
     finally:
