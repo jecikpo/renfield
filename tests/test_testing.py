@@ -1,6 +1,5 @@
 import json
 import subprocess
-from pathlib import Path
 
 from renfield.testing import call_record, fake_claude
 

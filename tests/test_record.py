@@ -1,5 +1,7 @@
 import json
 
+import pytest
+
 from renfield.record import (
     ESTIMATED_KINDS,
     StepRecord,
@@ -84,3 +86,21 @@ def test_the_summary_line_of_a_failed_step_names_its_class():
 def test_the_summary_line_says_how_many_attempts_only_when_there_was_a_retry():
     assert "attempt" not in summary_line(a_record(attempts=1))
     assert "3 attempts" in summary_line(a_record(attempts=3))
+
+
+def test_a_cost_that_is_not_a_number_gives_a_record_that_json_tools_read(tmp_path):
+    """Measured: a result event with "total_cost_usd": NaN wrote
+    "cost_usd": NaN into record.json. jq and JSON.parse reject that file,
+    and the CLI still said ok."""
+    nan = float("nan")
+    record = a_record(cost_usd=nan, duration_s=float("inf"))
+    data = as_dict(record)
+    assert data["cost_usd"] == 0.0
+    assert data["duration_s"] == 0.0
+    assert data["cost_known"] is False
+
+    path = tmp_path / "record.json"
+    write_record(path, record)
+    text = path.read_text()
+    assert "NaN" not in text and "Infinity" not in text
+    json.loads(text, parse_constant=lambda name: pytest.fail(name))

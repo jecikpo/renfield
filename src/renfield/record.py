@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import math
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
@@ -62,6 +63,13 @@ def estimated(kind: str) -> bool:
 def as_dict(record: StepRecord) -> dict:
     """Give the record as data, with the cost rounded."""
     data = asdict(record)
+    # json.dumps writes NaN and Infinity as bare words, and jq and
+    # JSON.parse reject them. A non-finite number was never measured.
+    if not math.isfinite(data["cost_usd"]):
+        data["cost_usd"] = 0.0
+        data["cost_known"] = False
+    if not math.isfinite(data["duration_s"]):
+        data["duration_s"] = 0.0
     data["cost_usd"] = round(data["cost_usd"], 6)
     if data["unknown_usd"] is not None:
         data["unknown_usd"] = round(data["unknown_usd"], 6)
@@ -73,7 +81,7 @@ def write_record(path: Path, record: StepRecord) -> None:
     """Write the record file. Build its folder first."""
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(as_dict(record), indent=2) + "\n")
+    path.write_text(json.dumps(as_dict(record), indent=2, allow_nan=False) + "\n")
 
 
 def summary_line(record: StepRecord) -> str:

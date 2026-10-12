@@ -23,10 +23,13 @@ Use Renfield only on material that you trust.
 | Program | Version | Why |
 |---|---|---|
 | Python | 3.11 or later | Renfield |
-| [Claude Code](https://claude.com/claude-code) | measured with 2.1.285 | the agent is 1 `claude -p` child process |
+| [Claude Code](https://claude.com/claude-code) | exercised with 2.1.285 | the agent is 1 `claude -p` child process |
 
 You need 1 provider. The provider is a Claude subscription, an Anthropic API
 key, or an OpenRouter key.
+
+The tests of the stream reader use events that were recorded from Claude Code
+2.1.273.
 
 ## Install
 
@@ -46,12 +49,16 @@ renfield run \
   --output verdict.json \
   --schema verdict.json=schemas/verdict.schema.json \
   --workdir . \
-  --model claude-opus-5
+  --model claude-opus-5 \
+  --config-dir /path/to/a/clean/config
 ```
 
 A value is text. Renfield does not read a file for it. `--value plan=docs/plan.md`
 puts those 12 characters into the prompt. The agent reads the file with its own
 tools.
+
+`--config-dir` sets `CLAUDE_CONFIG_DIR` for the agent. Use it for an independent
+second opinion. It keeps your own `~/.claude` away from the agent.
 
 **Read the prompt before you pay for it.** This command costs 0 USD:
 
@@ -102,6 +109,15 @@ record     = "record.json"
 ```
 
 The order of precedence is: built-in defaults, then this file, then the CLI flag.
+
+The agent reads your own `~/.claude` unless you set `--config-dir` (or
+`config_dir` in Python). That folder holds your global `CLAUDE.md`, your user
+hooks, your user agents, and your memory files. The flag `--setting-sources ""`,
+which Renfield always passes, does not cover them.
+
+`timeout_min` is the limit of 1 attempt, not of the whole step. With
+`--timeout-min 20 --retries 2`, a step can run for 62.5 minutes: 3 attempts and
+150 seconds of waits. Each attempt can take up to 15 more seconds to stop.
 **Do not commit `renfield.toml`.** It can hold a key.
 
 ## What 1 run writes
@@ -129,7 +145,7 @@ prompt is wrong, and the next call writes the same bad file.
 
 ## The cost is an estimate, except with an API key
 
-Claude Code prices every call at Anthropic rates. This is true for each vendor.
+Claude Code uses Anthropic prices for each vendor.
 A measured call on `meta-llama/llama-3.1-8b-instruct` reported 0.3141 USD.
 OpenRouter charges about 0.002 USD for it.
 
