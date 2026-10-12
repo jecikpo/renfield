@@ -813,6 +813,18 @@ def test_an_unknown_placeholder_is_an_error_and_names_the_allowed_ones():
     assert "step" in message and "stamp" in message
 
 
+@pytest.mark.parametrize("bad", ["runs/{step!x}", "runs/{step:d}"])
+def test_a_bad_conversion_or_format_spec_is_a_path_error(bad):
+    """`_check` passes these, because the placeholder name is `step`.
+    `.format` then raises a bare ValueError. Measured: "Unknown conversion
+    specifier x" and "Unknown format code 'd' for object of type 'str'"."""
+    with pytest.raises(PathError) as caught:
+        render(Paths(run_dir=bad), step="x", stamp="s")
+    message = str(caught.value)
+    assert "run_dir" in message
+    assert bad in message
+
+
 @pytest.mark.parametrize("bad", ["runs/{step", "runs/step}", "runs/{{step}"])
 def test_an_unbalanced_brace_is_a_path_error_and_names_the_key(bad):
     """`Formatter().parse` raises a bare ValueError for these 3 forms. The CLI
@@ -917,7 +929,16 @@ def render(paths: Paths, *, step: str, stamp: str | None = None) -> RunPaths:
     for key in ("run_dir", *RELATIVE):
         template = getattr(paths, key)
         _check(key, template)
-        filled[key] = template.format(**values)
+        try:
+            filled[key] = template.format(**values)
+        except (ValueError, KeyError, IndexError) as error:
+            # `_check` passes a template whose placeholder names are known,
+            # and `.format` can still fail on a conversion or a format spec.
+            # Measured: "{step!x}" and "{step:d}" both raise ValueError.
+            # Task 9's CLI catches PathError only.
+            raise PathError(
+                f"{key}: the value {template!r} is not a usable path: {error}"
+            ) from error
 
     for key in RELATIVE:
         if Path(filled[key]).is_absolute():
@@ -3072,6 +3093,7 @@ reviewer who finds the fix must not read it as an accident.
 | 7 | A step with no `max_usd` printed `limit None USD` on the first console line. | The line says "no cost limit". |
 | 8 | Task 2's auth test ran `json.loads` on every non-blank line of `auth-401.jsonl`, and line 1 of that fixture is a plain-text warning of the child. The test could not run. Found by the task 2 implementer. | The list comprehension keeps only the lines that start with `{`. `raw` still carries the warning line into `read_stream`. |
 | 9 | `paths.py` let a bare `ValueError` out of `Formatter().parse` for an unbalanced brace, and task 9's CLI catches `PathError` only. `renfield run --run-dir "runs/{step"` would have printed a traceback. Found by the task 4 implementer, measured by the controller. | `_check` wraps the comprehension and raises `PathError` naming the key and the reason. 3 forms get a test. |
+| 10 | The defect 9 fix guarded `Formatter().parse` and left `.format` open to the same leak. `"runs/{step!x}"` and `"runs/{step:d}"` both raise a bare `ValueError`. Found by the task 4 reviewer, measured by the controller. | `render` wraps the `.format` call too, and 2 more forms get a test. |
 
 **Spec coverage.** Each section of `docs/design.md` has a task: section 3 is
 tasks 3 and 8, section 4 is tasks 5, 7 and 8, section 5 is tasks 4 and 5,
