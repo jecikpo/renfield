@@ -1597,7 +1597,7 @@ git commit -m "feat: the output file checks, with the place in the file"
 - Create: `tests/test_record.py`
 
 **Interfaces:**
-- Produces: `StepRecord`, `ESTIMATED_KINDS`, `estimated(kind) -> bool`, `as_dict(record) -> dict`, `write_record(path, record) -> None`, `summary_line(record) -> str`, `environment(executable="claude") -> dict`.
+- Produces: `StepRecord`, `ESTIMATED_KINDS`, `estimated(kind) -> bool`, `as_dict(record) -> dict`, `write_record(path, record) -> None`, `summary_line(record) -> str`.
 
 **The field that this task exists for.** `cost_estimated` travels beside `cost_usd`. Claude Code prices every call at Anthropic rates, whatever vendor served it. A measured call on `meta-llama/llama-3.1-8b-instruct` reported 0.3141 USD where OpenRouter charges about 0.002 USD. A reader who adds an estimated cost to an invoice is wrong by 2 orders of 10.
 
@@ -1612,7 +1612,6 @@ from renfield.record import (
     ESTIMATED_KINDS,
     StepRecord,
     as_dict,
-    environment,
     estimated,
     summary_line,
     write_record,
@@ -1694,11 +1693,6 @@ def test_the_summary_line_says_how_many_attempts_only_when_there_was_a_retry():
     assert "attempt" not in summary_line(a_record(attempts=1))
     assert "3 attempts" in summary_line(a_record(attempts=3))
 
-
-def test_the_environment_reports_a_missing_claude_as_none_and_not_an_error():
-    data = environment(executable="/nonexistent/claude")
-    assert data["claude_version"] is None
-    assert data["renfield_version"]
 ```
 
 - [ ] **Step 2: Run it and watch it fail**
@@ -1714,11 +1708,8 @@ Expected: FAIL with `ModuleNotFoundError: No module named 'renfield.record'`
 from __future__ import annotations
 
 import json
-import subprocess
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
-
-from renfield.version import __version__
 
 # Claude Code prices every call at Anthropic rates, whatever vendor served
 # it. Measured on 2026-09-16: a call on meta-llama/llama-3.1-8b-instruct
@@ -1802,24 +1793,6 @@ def summary_line(record: StepRecord) -> str:
     parts.append(cost)
     return f"{record.name}: " + ", ".join(parts)
 
-
-def environment(executable: str = "claude") -> dict:
-    """Give the version of Renfield, and of the agent program."""
-    return {
-        "renfield_version": __version__,
-        "claude_version": _version_of(executable),
-    }
-
-
-def _version_of(executable: str) -> str | None:
-    """Give the version text of a program, or None. Never raise."""
-    try:
-        done = subprocess.run(
-            [executable, "--version"], capture_output=True, text=True, timeout=20
-        )
-    except (OSError, subprocess.SubprocessError):
-        return None
-    return done.stdout.strip() or None
 ```
 
 - [ ] **Step 4: Run the tests and watch them pass**
@@ -2674,6 +2647,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 from pathlib import Path
 from typing import Sequence
@@ -2766,7 +2740,7 @@ def _run(args) -> int:
         "add_dirs": args.add_dir or None,
         "skills": _skills(args.skill) or None,
     }
-    settings = load(config_path, overrides=overrides)
+    settings = load(config_path, overrides=overrides, env=os.environ)
     values = _values(args.values, args.value)
     schemas = _schemas(args.schema)
 
@@ -3087,3 +3061,16 @@ open item is not work.
 **1 thing this plan adds that the spec does not hold.** `StepRecord` gains
 `child_exit_code`. Without it, no test can tell a SIGINT death from a SIGKILL
 death, and the escalation of section 8.3 then has no test that can fail.
+
+---
+
+## Preflight rulings
+
+The controller scanned this plan before task 1, and ruled on what the scan
+found. Each ruling is already applied above.
+
+| Ruling | Decision | Cost if wrong |
+|---|---|---|
+| R1 | `cli.py` passes `env=os.environ` to `load`. Without it `env` defaults to `{}`, and an `api_key_env` can never resolve. | The `openrouter` and `anthropic-api` kinds fail from the CLI with "that variable is empty or absent", and only `subscription` works. |
+| R2 | `environment()` and `_version_of` leave task 7. Nothing consumes them, and `docs/design.md`, section 4.4, has no version field. | A caller who wants the version of the agent program runs `claude --version` itself, which is 1 line. |
+| R3 | The work happens on the branch `renfield-build` of this repository, and not in a git worktree. | A plan that must be abandoned costs 1 `git branch -D`. Nothing else is in flight in this repository. |
