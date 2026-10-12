@@ -556,8 +556,10 @@ def test_a_non_ascii_prompt_reaches_the_child_byte_for_byte(tmp_path):
 
 # --- a child that never started owes nothing ---
 
-def test_a_missing_program_raises_and_writes_no_record(tmp_path):
-    """Measured: with a missing executable and max_usd 6.0 the record said
+def test_a_program_that_cannot_start_leaves_no_record(tmp_path):
+    """Nothing was paid, so there is nothing to record.
+
+    Measured: with a missing executable and max_usd 6.0 the record said
     unknown_usd 6.0 and cost_known False. No child started, so no cost
     exists, and docs/design.md section 9 defines unknown_usd as the largest
     value that the call could have cost."""
@@ -565,3 +567,30 @@ def test_a_missing_program_raises_and_writes_no_record(tmp_path):
         call(tmp_path, tmp_path / "claude-does-not-exist",
              step=a_step(max_usd=6.0))
     assert not (tmp_path / "out" / "record.json").exists()
+
+
+def test_a_program_that_cannot_start_on_a_later_attempt_keeps_the_record(
+    tmp_path, monkeypatch
+):
+    """A transient failure paid for attempt 1. If attempt 2 cannot start, the
+    record of that spend must survive. Measured before the fix: the
+    ProviderError propagated and no record.json existed, although attempt 1
+    had cost 0.70 USD."""
+    calls = []
+    real = subprocess.Popen
+
+    def spy(*args, **kwargs):
+        calls.append(1)
+        if len(calls) == 2:
+            raise FileNotFoundError(2, "No such file or directory")
+        return real(*args, **kwargs)
+
+    monkeypatch.setattr("renfield.step.subprocess.Popen", spy)
+    program = fake_claude(tmp_path, stream=TRANSIENT)
+    with pytest.raises(ProviderError):
+        call(tmp_path, program, step=a_step(retries=2, max_usd=5.0))
+
+    data = json.loads((tmp_path / "out" / "record.json").read_text())
+    assert data["attempts"] == 2
+    assert data["cost_usd"] > 0, "the cost of attempt 1 must survive"
+    assert data["error_class"] == "crashed"

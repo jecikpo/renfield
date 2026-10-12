@@ -146,12 +146,14 @@ def run_step(
             if result.error_class != RETRY_CLASS or attempt == len(waits) + 1:
                 break
             sleep(waits[attempt - 1])
-    except ProviderError:
-        # No child ever started, so nothing was paid and there is nothing to
-        # record. The CLI maps this to exit 1, a config error, like every
-        # other failure that happens before the agent runs.
-        raise
     except BaseException as error:
+        if isinstance(error, ProviderError) and record.attempts <= 1:
+            # No child ever started on the first attempt, so nothing was
+            # paid and there is nothing to record. The CLI maps this to exit
+            # 1, like every other failure before the agent runs. On a later
+            # attempt an earlier one may already have been paid for, so the
+            # record must survive.
+            raise
         # The call may already have been paid for. A record that says the
         # cost is unknown is worth more than a traceback with no record.
         # Renfield cannot capture the cost here: the child is in its own
