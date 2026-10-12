@@ -43,6 +43,7 @@ class StepRecord:
     run_dir: str | None = None
     prompt: str | None = None               # relative to run_dir
     transcript: str | None = None           # relative to run_dir
+    record: str | None = None               # relative to run_dir
     outputs: list[str] = field(default_factory=list)
     # True when each expected output is there and passes its checks. This can
     # be true for a step that failed: a limit can arrive after the agent wrote

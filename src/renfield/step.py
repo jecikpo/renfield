@@ -108,6 +108,7 @@ def run_step(
         run_dir=str(run.run_dir),
         prompt=str(run.prompt.relative_to(run.run_dir)),
         transcript=str(run.transcript.relative_to(run.run_dir)),
+        record=str(run.record.relative_to(run.run_dir)),
     )
 
     command = _command(step, run, executable)
