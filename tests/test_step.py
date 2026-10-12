@@ -10,7 +10,7 @@ import pytest
 
 from renfield.config import Skill, Step
 from renfield.paths import Paths
-from renfield.provider import Provider
+from renfield.provider import Provider, ProviderError
 from renfield.step import PromptError, RETRY_WAITS, render_prompt, run_step
 from renfield.testing import call_record, fake_claude
 
@@ -552,3 +552,16 @@ def test_a_non_ascii_prompt_reaches_the_child_byte_for_byte(tmp_path):
     on_disk = (tmp_path / "out" / "prompts" / "review.md").read_bytes()
     assert seen.read_bytes() == on_disk
     seen.read_bytes().decode("utf-8")   # must not raise
+
+
+# --- a child that never started owes nothing ---
+
+def test_a_missing_program_raises_and_writes_no_record(tmp_path):
+    """Measured: with a missing executable and max_usd 6.0 the record said
+    unknown_usd 6.0 and cost_known False. No child started, so no cost
+    exists, and docs/design.md section 9 defines unknown_usd as the largest
+    value that the call could have cost."""
+    with pytest.raises(ProviderError, match="claude-does-not-exist"):
+        call(tmp_path, tmp_path / "claude-does-not-exist",
+             step=a_step(max_usd=6.0))
+    assert not (tmp_path / "out" / "record.json").exists()

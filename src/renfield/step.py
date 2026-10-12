@@ -27,7 +27,7 @@ from typing import Any, Callable, Iterator, Mapping, Sequence
 from renfield.config import Skill, Step
 from renfield.outputs import check_outputs
 from renfield.paths import Paths, make_dirs, render as render_paths
-from renfield.provider import Provider, build_env
+from renfield.provider import Provider, ProviderError, build_env
 from renfield.record import StepRecord, estimated, write_record
 from renfield.stream import describe_event, read_stream
 
@@ -146,6 +146,11 @@ def run_step(
             if result.error_class != RETRY_CLASS or attempt == len(waits) + 1:
                 break
             sleep(waits[attempt - 1])
+    except ProviderError:
+        # No child ever started, so nothing was paid and there is nothing to
+        # record. The CLI maps this to exit 1, a config error, like every
+        # other failure that happens before the agent runs.
+        raise
     except BaseException as error:
         # The call may already have been paid for. A record that says the
         # cost is unknown is worth more than a traceback with no record.
@@ -230,19 +235,24 @@ def _run_once(
 ):
     """Start 1 child, read its stream to the end, and give the result."""
     started = time.monotonic()
-    process = subprocess.Popen(
-        list(command),
-        cwd=str(workdir),
-        env=dict(env),
-        stdin=subprocess.PIPE,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.STDOUT,
-        text=True,
-        encoding="utf-8",
-        errors="replace",
-        bufsize=1,
-        start_new_session=True,
-    )
+    try:
+        process = subprocess.Popen(
+            list(command),
+            cwd=str(workdir),
+            env=dict(env),
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            bufsize=1,
+            start_new_session=True,
+        )
+    except (FileNotFoundError, PermissionError) as error:
+        raise ProviderError(
+            f"the agent program {command[0]!r} cannot be started: {error}"
+        ) from error
 
     timed_out = threading.Event()
     watchdog = threading.Timer(

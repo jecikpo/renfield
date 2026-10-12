@@ -247,3 +247,12 @@ def test_the_cli_resolves_an_api_key_from_the_environment(tmp_path, monkeypatch)
     argv = call["argv"]
     assert argv[argv.index("--model") + 1] == "from-the-flag", "a flag beats the file"
     assert argv[argv.index("--effort") + 1] == "medium", "the file keeps its own key"
+
+
+def test_a_missing_program_exits_1_with_a_message_and_no_traceback(tmp_path, capsys):
+    code = main(argv(tmp_path, tmp_path / "claude-does-not-exist", "--max-usd", "6"))
+    assert code == 1
+    error = capsys.readouterr().err
+    assert "claude-does-not-exist" in error
+    assert "Traceback" not in error
+    assert not (tmp_path / "out" / "record.json").exists()
