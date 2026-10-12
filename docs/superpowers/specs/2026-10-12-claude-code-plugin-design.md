@@ -110,8 +110,9 @@ Claude proposes the name. The operator confirms it.
 | `switch` | Ask: "run on Renfield?" On yes, do a direct run (section 5.3). |
 | `stay` | Use a native subagent. Do not offer Renfield. |
 
-Each question names the model, `max_usd`, `timeout_min`, and the warning of
-section 4, item 6.
+Each question names the model entry, its model ID, `max_usd`, `timeout_min`,
+and the warning of section 4, item 6. If `renfield.toml` has 2 or more
+entries, Claude asks which entry to use, and passes it with `--model NAME`.
 
 ### 5.2 The comparison
 
@@ -159,9 +160,9 @@ before it adds the line.
 ```markdown
 # Renfield decisions
 
-| Kind | Decision | Date | Model | Comparison run |
-|---|---|---|---|---|
-| code-review | switch | 2026-10-12 | deepseek/deepseek-v4.1-flash | .renfield/runs/2026-10-12T14-03-51-code-review |
+| Kind | Decision | Date | Model entry | Model ID | Comparison run |
+|---|---|---|---|---|---|
+| code-review | switch | 2026-10-12 | flash | deepseek/deepseek-v4.1-flash | .renfield/runs/2026-10-12T14-03-51-code-review |
 ```
 
 Rules:
@@ -170,8 +171,9 @@ Rules:
    row.
 2. The file goes into git. The run folder does not. The link to the run is
    local to 1 machine. The model and the date are valid for the team.
-3. If the model in `renfield.toml` is not the model of the row, the decision
-   does not apply. Claude tells the operator and offers a new comparison.
+3. A row names the model entry and the raw model ID. If the entry in
+   `renfield.toml` now holds a different model ID, the decision does not
+   apply. Claude tells the operator and offers a new comparison.
 
 ## 7. Failures
 
