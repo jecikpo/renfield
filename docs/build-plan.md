@@ -3174,13 +3174,18 @@ reviewer who finds the fix must not read it as an accident.
 | 35 | The `lru_cache` on `_schema` could validate an output against another output's schema, giving a false `outputs_valid`, which is the exit 5 signal a caller must never retry. **The controller had parked this as a minor on the grounds that a CLI run is 1 step per process; the final review rejected that, because the library path is the documented public API and the stated first user is a long-running agent.** | The decorator is deleted. |
 | 36 | 6 ordinary user errors printed a traceback instead of a message, including a mistyped `--template`, which is the most likely error of the whole CLI. Found and each one measured by the final review. | The CLI catches `OSError` and `ValueError` and prints `renfield: <message>` with exit 1. |
 | 37 | An `--add-dir` that does not exist was dropped with no message, and `add_dirs` had no test at all, so a caller who mistyped a directory paid for a full agent run that could not read its material. Found by the final review. | A named `add_dir` that is not a directory raises `ConfigError`; the `is_dir()` filter stays for the artifacts folder only. 2 tests. |
+| 38 | **The controller's own fix for defect 34 reintroduced the class it was fixing.** `except ProviderError: raise` sat ahead of the record wrapper, so a `Popen` that failed on attempt 2 or 3 lost the record of an attempt that had already been paid for. Measured by the controller with a spy on the second `Popen`: attempt 1 cost 0.70 USD and no `record.json` existed. Found by the fix-wave implementer. | The pass-through folds into the one handler and fires only when `record.attempts <= 1`. 1 test, proved by mutation. |
+| 39 | The defect-30 fix cleaned a non-finite cost in `as_dict` only, so `record.json` held `0.0` with `cost_known: false` while the console line printed `nan USD` for the same record. Found by the fix-wave implementer, measured by the controller. | `read_stream` sets the cost to 0.0 and `cost_known` to false where the number enters the package. The `as_dict` guard stays as a second layer. |
 
-### What the 37 rows say about this plan
+### What the 39 rows say about this plan
 
-**13 of the 37 are one defect class: a function that raises where it promised
-to return a value.** Rows 9, 10, 14, 15, 17, 19, 21, 22, 26, 31, 33 and 34 are
-that class, in 4 modules, found by 3 implementers, 4 task reviewers and the
-final review, over 6 fix rounds. Each fix was 1 to 6 lines. The plan specified
+**14 of the 39 are one defect class: a function that raises where it promised
+to return a value.** Rows 9, 10, 14, 15, 17, 19, 21, 22, 26, 31, 33, 34 and 38
+are that class, in 4 modules, found by 4 implementers, 4 task reviewers and the
+final review, over 7 fix rounds. **Row 38 is the worst of them: it is the
+controller's own fix for row 34, which reintroduced the class while removing
+it.** That is the strongest argument for the checklist item below, because a
+reviewer had already named the class 13 times and it still happened. Each fix was 1 to 6 lines. The plan specified
 the behaviour of every one of those functions correctly and never once
 specified the guard.
 
