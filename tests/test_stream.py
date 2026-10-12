@@ -124,3 +124,25 @@ def test_a_field_with_an_unexpected_type_does_not_lose_the_cost():
 def test_a_thinking_event_with_a_bad_estimate_does_not_raise():
     lines = [json.dumps({"subtype": "thinking_tokens", "estimated_tokens": "x"}) + "\n"]
     assert read_stream(lines).thinking_tokens == 0
+
+
+def test_a_403_status_is_an_auth_failure():
+    event = {"type": "result", "subtype": "error", "is_error": True,
+             "api_error_status": 403, "result": "forbidden"}
+    assert read_stream([json.dumps(event) + "\n"]).error_class == "auth"
+
+
+def test_a_usage_limit_in_the_text_is_a_rate_limit():
+    event = {"type": "result", "subtype": "success", "is_error": True,
+             "result": "You have reached your usage limit"}
+    assert read_stream([json.dumps(event) + "\n"]).error_class == "rate_limited"
+
+
+def test_a_result_with_is_error_false_is_ok_whatever_its_subtype_says():
+    """docs/design.md section 7: the classifier reads is_error first. A
+    reader of the subtype would call this event a failure."""
+    event = {"type": "result", "subtype": "error_max_turns",
+             "is_error": False, "total_cost_usd": 0.3}
+    result = read_stream([json.dumps(event) + "\n"])
+    assert result.ok is True
+    assert result.error_class is None

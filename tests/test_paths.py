@@ -91,11 +91,12 @@ def test_a_bad_conversion_or_format_spec_is_a_path_error(bad):
     assert bad in message
 
 
-def test_an_absolute_value_for_a_relative_key_is_an_error():
+@pytest.mark.parametrize("key", ["prompt", "transcript", "artifacts", "record"])
+def test_an_absolute_value_for_a_relative_key_is_an_error(key):
     """pathlib drops the left side of a join with an absolute path, so a
     value of /tmp/p.md would leave run_dir with no warning."""
-    with pytest.raises(PathError, match="prompt"):
-        render(Paths(prompt="/tmp/p.md"), step="x", stamp="s")
+    with pytest.raises(PathError, match=key):
+        render(Paths(**{key: "/tmp/p.md"}), step="x", stamp="s")
 
 
 def test_an_absolute_run_dir_is_allowed():

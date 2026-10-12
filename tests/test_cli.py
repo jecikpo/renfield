@@ -321,3 +321,25 @@ def test_an_add_dir_that_does_not_exist_exits_1_and_names_the_path(tmp_path, cap
     assert "/no/such/dir" in capsys.readouterr().err
     with pytest.raises(FileNotFoundError):
         call_record(tmp_path)
+
+
+def test_the_default_config_file_is_read_when_no_config_is_given(
+    tmp_path, monkeypatch
+):
+    """Deleting the default_config branch of cli._run passed every other
+    test: the config file of each user of the default went unread."""
+    (tmp_path / "renfield.toml").write_text(
+        '[provider]\nmodel = "from-the-default-file"\n'
+    )
+    template = tmp_path / "t.md"
+    template.write_text("read $plan\n")
+    program = fake_claude(tmp_path, stream=SUCCESS)
+    monkeypatch.chdir(tmp_path)
+    code = main([
+        "run", "--template", str(template), "--value", "plan=x",
+        "--workdir", str(tmp_path), "--run-dir", str(tmp_path / "out"),
+        "--executable", str(program),
+    ])
+    assert code == 0
+    command = call_record(tmp_path)["argv"]
+    assert command[command.index("--model") + 1] == "from-the-default-file"
