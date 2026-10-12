@@ -39,7 +39,10 @@ def _first_problem(
         path = artifacts / name
         if not path.is_file():
             return f"the agent did not write {name}"
-        text = path.read_text().strip()
+        try:
+            text = path.read_text().strip()
+        except (OSError, UnicodeDecodeError) as error:
+            return f"{name} cannot be read: {error}"
         if not text:
             return f"{name} is empty"
 
@@ -55,7 +58,7 @@ def _first_problem(
             continue
         try:
             schema = _schema(str(schema_path))
-        except (OSError, json.JSONDecodeError) as error:
+        except (OSError, UnicodeDecodeError, json.JSONDecodeError) as error:
             return f"the schema {schema_path} cannot be read: {error}"
 
         problem = _validate(data, schema)

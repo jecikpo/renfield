@@ -106,3 +106,25 @@ def test_a_schema_file_that_is_not_there_is_an_error(tmp_path):
 
 def test_no_output_at_all_passes(tmp_path):
     assert check_outputs(tmp_path, [], {}) == (True, None)
+
+
+def test_a_file_that_is_not_utf8_gives_a_reason_and_does_not_raise(tmp_path):
+    """check_outputs promises a reason, not an exception. run_step calls it
+    after the agent has been paid for, and the CLI catches 4 named errors
+    only, so a UnicodeDecodeError would reach a person as a traceback and the
+    record would never be written."""
+    (tmp_path / "report.md").write_bytes(b"\xff\xfe not utf 8")
+    ok, reason = check_outputs(tmp_path, ["report.md"], {})
+    assert ok is False
+    assert "report.md" in reason
+
+
+def test_a_schema_that_is_not_utf8_gives_a_reason_and_does_not_raise(tmp_path):
+    """UnicodeDecodeError is a ValueError, not an OSError, so the original
+    tuple did not catch it."""
+    (tmp_path / "verdict.json").write_text("{}")
+    schema = tmp_path / "bad.schema.json"
+    schema.write_bytes(b"\xff\xfe")
+    ok, reason = check_outputs(tmp_path, ["verdict.json"], {"verdict.json": schema})
+    assert ok is False
+    assert "bad.schema.json" in reason
