@@ -350,6 +350,16 @@ beside a failed status. The caller decides whether to use that file.
 | `transient` | status 500 or higher, or no other class matches | **yes** |
 | `timeout` | The child passed `timeout_min` | no |
 | `invalid_output` | Section 7 | no |
+| `interrupted` | Ctrl-C reached Renfield | no |
+| `crashed` | Any other escape, for example an `OSError` from the transcript write | no |
+
+**`interrupted` and `crashed` keep a record of a paid call.** The child runs
+in its own session, so the terminal's SIGINT never reaches it, and the parent
+stops reading its stream. Renfield therefore cannot capture the cost on those
+2 paths. It writes the record with `cost_known: false`, and `unknown_usd`
+holds the step limit. **The exception keeps propagating**, so Ctrl-C still
+gives exit code 130 and an unexpected fault still reaches the caller. The
+record is on disk either way.
 
 **The classifier reads `is_error` first.** A result event with `is_error: false`
 has no class, whatever its subtype says. A result event with `is_error: true`
