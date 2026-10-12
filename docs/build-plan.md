@@ -813,6 +813,18 @@ def test_an_unknown_placeholder_is_an_error_and_names_the_allowed_ones():
     assert "step" in message and "stamp" in message
 
 
+@pytest.mark.parametrize("bad", ["runs/{step", "runs/step}", "runs/{{step}"])
+def test_an_unbalanced_brace_is_a_path_error_and_names_the_key(bad):
+    """`Formatter().parse` raises a bare ValueError for these 3 forms. The CLI
+    catches PathError only, so a bare ValueError would reach a person as a
+    traceback."""
+    with pytest.raises(PathError) as caught:
+        render(Paths(run_dir=bad), step="x", stamp="s")
+    message = str(caught.value)
+    assert "run_dir" in message
+    assert bad in message
+
+
 def test_an_absolute_value_for_a_relative_key_is_an_error():
     """pathlib drops the left side of a join with an absolute path, so a
     value of /tmp/p.md would leave run_dir with no warning."""
@@ -926,9 +938,17 @@ def render(paths: Paths, *, step: str, stamp: str | None = None) -> RunPaths:
 
 def _check(key: str, template: str) -> None:
     """Stop a template that names a placeholder that does not exist."""
-    names = [
-        name for _, name, _, _ in Formatter().parse(template) if name is not None
-    ]
+    try:
+        names = [
+            name for _, name, _, _ in Formatter().parse(template) if name is not None
+        ]
+    except ValueError as error:
+        # `Formatter().parse` raises ValueError for an unbalanced brace. The
+        # CLI of task 9 catches PathError, so a bare ValueError would reach a
+        # person as a traceback.
+        raise PathError(
+            f"{key}: the value {template!r} is not a usable path: {error}"
+        ) from error
     unknown = [name for name in names if name not in PLACEHOLDERS]
     if unknown:
         raise PathError(
@@ -3051,6 +3071,7 @@ reviewer who finds the fix must not read it as an accident.
 | 6 | The README step used a 3-backtick fence and holds `sh` and `toml` blocks. The first inner fence closed the outer one. | A 4-backtick outer fence. |
 | 7 | A step with no `max_usd` printed `limit None USD` on the first console line. | The line says "no cost limit". |
 | 8 | Task 2's auth test ran `json.loads` on every non-blank line of `auth-401.jsonl`, and line 1 of that fixture is a plain-text warning of the child. The test could not run. Found by the task 2 implementer. | The list comprehension keeps only the lines that start with `{`. `raw` still carries the warning line into `read_stream`. |
+| 9 | `paths.py` let a bare `ValueError` out of `Formatter().parse` for an unbalanced brace, and task 9's CLI catches `PathError` only. `renfield run --run-dir "runs/{step"` would have printed a traceback. Found by the task 4 implementer, measured by the controller. | `_check` wraps the comprehension and raises `PathError` naming the key and the reason. 3 forms get a test. |
 
 **Spec coverage.** Each section of `docs/design.md` has a task: section 3 is
 tasks 3 and 8, section 4 is tasks 5, 7 and 8, section 5 is tasks 4 and 5,
