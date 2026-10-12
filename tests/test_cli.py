@@ -17,6 +17,16 @@ AUTH = json.dumps(
 ) + "\n"
 
 
+def config_of(tmp_path, text='[models.m]\nmodel = "m"\n', name="cli.toml"):
+    """Write the config file of a test. The default name is cli.toml, and not
+    renfield.toml: a test that writes its own renfield.toml must not lose it.
+    A test that passes its own --config to argv() uses another name, because
+    argv() writes cli.toml after the arguments of the call are built."""
+    path = tmp_path / name
+    path.write_text(text)
+    return path
+
+
 def argv(tmp_path, program, *extra):
     template = tmp_path / "t.md"
     template.write_text("read $plan\n")
@@ -26,6 +36,7 @@ def argv(tmp_path, program, *extra):
         "--value", "plan=docs/plan.md",
         "--workdir", str(tmp_path),
         "--run-dir", str(tmp_path / "out"),
+        "--config", str(config_of(tmp_path)),
         "--model", "m",
         "--executable", str(program),
         *extra,
@@ -111,6 +122,7 @@ def test_a_value_keeps_each_equals_sign_after_the_first(tmp_path):
     code = main([
         "run", "--template", str(template), "--value", "q=a=b=c",
         "--workdir", str(tmp_path), "--run-dir", str(tmp_path / "out"),
+        "--config", str(config_of(tmp_path)),
         "--model", "m", "--executable", str(program),
     ])
     assert code == 0
@@ -130,7 +142,9 @@ def test_a_template_that_needs_a_value_nobody_gave_exits_1(tmp_path, capsys):
     program = fake_claude(tmp_path, stream=SUCCESS)
     code = main([
         "run", "--template", str(template), "--workdir", str(tmp_path),
-        "--run-dir", str(tmp_path / "out"), "--model", "m",
+        "--run-dir", str(tmp_path / "out"),
+        "--config", str(config_of(tmp_path)),
+        "--model", "m",
         "--executable", str(program),
     ])
     assert code == 1
@@ -210,19 +224,20 @@ def test_every_failure_class_exits_4_and_never_5(tmp_path, stream, expected_clas
     assert data["error_class"] == expected_class
 
 
-def test_the_cli_resolves_an_api_key_from_the_environment(tmp_path, monkeypatch):
+def test_the_model_flag_selects_1_entry_and_its_key_reaches_the_child(
+    tmp_path, monkeypatch
+):
     """Preflight ruling R1: without env=os.environ in the load() call, load
     sees an empty environment and an api_key_env can never resolve, so only
-    the subscription kind works from the CLI. Deleting that argument breaks
-    no other test in the suite. This also covers the file-to-flag precedence
-    and the openrouter environment of the child."""
-    config = tmp_path / "renfield.toml"
-    config.write_text(
-        '[provider]\n'
-        'kind = "openrouter"\n'
-        'api_key_env = "OR_KEY"\n'
-        'model = "from-the-file"\n'
-        'effort = "medium"\n'
+    the subscription kind works from the CLI. This also covers the selection
+    of an entry that is not the default, and the openrouter environment of
+    the child."""
+    config = config_of(
+        tmp_path,
+        'default = "opus"\n\n'
+        '[models.opus]\nmodel = "claude-opus-5-5"\neffort = "xhigh"\n\n'
+        '[models.flash]\nkind = "openrouter"\napi_key_env = "OR_KEY"\n'
+        'model = "deepseek/deepseek-v4.1-flash"\neffort = "medium"\n',
     )
     monkeypatch.setenv("OR_KEY", "the-key-of-the-environment")
     program = fake_claude(tmp_path, stream=SUCCESS)
@@ -237,7 +252,7 @@ def test_the_cli_resolves_an_api_key_from_the_environment(tmp_path, monkeypatch)
         "--workdir", str(tmp_path),
         "--run-dir", str(tmp_path / "out"),
         "--executable", str(program),
-        "--model", "from-the-flag",
+        "--model", "flash",
     ])
 
     assert code == 0
@@ -245,8 +260,8 @@ def test_the_cli_resolves_an_api_key_from_the_environment(tmp_path, monkeypatch)
     assert call["env"]["ANTHROPIC_AUTH_TOKEN"] == "the-key-of-the-environment"
     assert call["env"]["ANTHROPIC_API_KEY"] == ""
     argv = call["argv"]
-    assert argv[argv.index("--model") + 1] == "from-the-flag", "a flag beats the file"
-    assert argv[argv.index("--effort") + 1] == "medium", "the file keeps its own key"
+    assert argv[argv.index("--model") + 1] == "deepseek/deepseek-v4.1-flash"
+    assert argv[argv.index("--effort") + 1] == "medium", "the entry keeps its own key"
 
 
 def test_a_missing_program_exits_1_with_a_message_and_no_traceback(tmp_path, capsys):
@@ -296,7 +311,7 @@ def test_a_malformed_values_file_exits_1(tmp_path, capsys):
 def test_a_config_file_that_is_not_utf8_exits_1(tmp_path, capsys):
     program = fake_claude(tmp_path, stream=SUCCESS)
     bad = tmp_path / "renfield.toml"
-    bad.write_bytes(b"[provider]\nmodel = \"caf\xe9\"\n")
+    bad.write_bytes(b"[models.m]\nmodel = \"caf\xe9\"\n")
     assert main(argv(tmp_path, program, "--config", str(bad))) == 1
     assert "Traceback" not in capsys.readouterr().err
 
@@ -329,7 +344,7 @@ def test_the_default_config_file_is_read_when_no_config_is_given(
     """Deleting the default_config branch of cli._run passed every other
     test: the config file of each user of the default went unread."""
     (tmp_path / "renfield.toml").write_text(
-        '[provider]\nmodel = "from-the-default-file"\n'
+        '[models.m]\nmodel = "from-the-default-file"\n'
     )
     template = tmp_path / "t.md"
     template.write_text("read $plan\n")

@@ -31,8 +31,16 @@ ENTRY_RULE = "1 to 64 characters of a-z, 0-9, '-', and '_'"
 
 PROVIDER_KEYS = ("kind", "model", "effort", "api_key", "api_key_env", "base_url")
 STEP_KEYS = ("timeout_min", "max_usd", "retries")
+ENTRY_KEYS = PROVIDER_KEYS + STEP_KEYS
 PATH_KEYS = ("run_dir", "prompt", "transcript", "artifacts", "record")
-TABLES = {"provider": PROVIDER_KEYS, "step": STEP_KEYS, "paths": PATH_KEYS}
+TABLES = {"step": STEP_KEYS, "paths": PATH_KEYS}
+TOP_LEVEL = ("default", "models", "step", "paths")
+LIMITS = {
+    "timeout_min": (TIMEOUT_RANGE, int),
+    "max_usd": (MAX_USD_RANGE, float),
+    "retries": (RETRIES_RANGE, int),
+}
+NO_MODEL = "no model: add a [models.<name>] table to renfield.toml"
 
 
 class ConfigError(Exception):
@@ -100,16 +108,18 @@ def load(
     *,
     overrides: Mapping[str, Any] | None = None,
     env: Mapping[str, str] | None = None,
+    resolve_key: bool = True,
 ) -> Settings:
-    """Read the file, apply the overrides, check each range, and give the settings."""
+    """Read the file, select 1 entry, apply the overrides, check each range,
+    and give the settings.
+
+    `overrides["model"]` is the name of an entry, and not a model ID.
+    `resolve_key=False` does not read the key from the environment: a render
+    costs 0 USD and needs no key.
+    """
     data = _read(path)
     given = {key: value for key, value in (overrides or {}).items() if value is not None}
     env = {} if env is None else env
-
-    def pick(table: str, key: str, default: Any = None) -> Any:
-        if key in given:
-            return given[key]
-        return data.get(table, {}).get(key, default)
 
     # The file cannot set the name: 1 file serves many steps. The CLI passes
     # it, and the default serves a direct call of the library.
@@ -120,40 +130,53 @@ def load(
             f"'-', '_', and '.'"
         )
 
-    model = pick("provider", "model")
-    if not model:
-        raise ConfigError(
-            "model: no value. Set [provider] model in the file, or pass --model."
-        )
+    step_table = data.get("step", {})
+    for key, value in step_table.items():
+        _check_limit(f"step.{key}", key, value)
+    entries = data.get("models", {})
+    for entry_name, entry in entries.items():
+        _check_entry(entry_name, entry)
+    selected = _select(entries, data, given.get("model"))
+    entry = entries[selected]
 
-    kind = _one_of("kind", pick("provider", "kind", "subscription"), KINDS)
-    effort = _one_of("effort", pick("provider", "effort", "high"), EFFORTS)
-    timeout_min = _in_range(
-        "timeout_min", pick("step", "timeout_min", 20), TIMEOUT_RANGE, int
-    )
-    retries = _in_range("retries", pick("step", "retries", 2), RETRIES_RANGE, int)
-    max_usd = pick("step", "max_usd")
+    def pick(key: str, default: Any = None) -> Any:
+        if key in given:
+            return given[key]
+        if key in entry:
+            return entry[key]
+        return step_table.get(key, default)
+
+    effort = _one_of("effort", pick("effort", "high"), EFFORTS)
+    timeout_min = _in_range("timeout_min", pick("timeout_min", 20), TIMEOUT_RANGE, int)
+    retries = _in_range("retries", pick("retries", 2), RETRIES_RANGE, int)
+    max_usd = pick("max_usd")
     if max_usd is not None:
         max_usd = _in_range("max_usd", max_usd, MAX_USD_RANGE, float)
 
     provider = Provider(
-        kind=kind,
-        api_key=_api_key(kind, pick, env),
-        base_url=pick("provider", "base_url"),
+        kind=entry.get("kind", "subscription"),
+        api_key=_api_key(f"models.{selected}", entry, env) if resolve_key else None,
+        base_url=entry.get("base_url"),
     )
     step = Step(
         name=name,
-        model=str(model),
+        model=str(entry["model"]),
         effort=effort,
         timeout_min=timeout_min,
         max_usd=max_usd,
         retries=retries,
         add_dirs=[Path(p) for p in given.get("add_dirs", [])],
         skills=list(given.get("skills", [])),
+        model_entry=selected,
     )
+    path_table = data.get("paths", {})
+
+    def pick_path(key: str) -> Any:
+        return given[key] if key in given else path_table.get(key)
+
     paths = replace(
         Paths(),
-        **{key: str(pick("paths", key)) for key in PATH_KEYS if pick("paths", key)},
+        **{key: str(pick_path(key)) for key in PATH_KEYS if pick_path(key)},
     )
     return Settings(provider=provider, step=step, paths=paths)
 
@@ -171,45 +194,126 @@ def _read(path: Path | None) -> dict:
     except tomllib.TOMLDecodeError as error:
         raise ConfigError(f"{path} is not valid TOML: {error}") from error
 
-    for table, values in data.items():
-        if table not in TABLES:
+    for key, values in data.items():
+        if key not in TOP_LEVEL:
             raise ConfigError(
-                f"unknown table [{table}]. The tables are "
-                f"{', '.join('[%s]' % name for name in TABLES)}."
+                f"unknown key or table {key!r}. The top level holds default, "
+                f"[models.<name>], [step], and [paths]."
             )
+        if key == "default":
+            continue
         if not isinstance(values, dict):
-            raise ConfigError(f"[{table}] must be a table")
-        for key in values:
-            if key not in TABLES[table]:
+            raise ConfigError(f"[{key}] must be a table")
+        if key == "models":
+            continue
+        for name in values:
+            if name not in TABLES[key]:
                 raise ConfigError(
-                    f"unknown key {key!r} in [{table}]. The keys are "
-                    f"{', '.join(TABLES[table])}."
+                    f"unknown key {name!r} in [{key}]. The keys are "
+                    f"{', '.join(TABLES[key])}."
                 )
     return data
 
 
-def _api_key(kind: str, pick, env: Mapping[str, str]) -> str | None:
-    literal = pick("provider", "api_key")
-    variable = pick("provider", "api_key_env")
-    if literal and variable:
+def _check_entry(name: str, entry: Any) -> None:
+    """Check 1 [models.<name>] table: its name, its keys, and its ranges.
+
+    Each entry is checked, and not only the selected one: a bad entry fails
+    at once, and not on the day that a caller selects it.
+    """
+    if not isinstance(entry, dict):
+        raise ConfigError(f"models.{name} must be a [models.{name}] table")
+    for key, value in entry.items():
+        if isinstance(value, dict):
+            raise ConfigError(f"[models.{name}.{key}]: an entry name has no dot")
+    if not ENTRY_PATTERN.fullmatch(name):
+        raise ConfigError(f"models: the entry name {name!r} is not {ENTRY_RULE}")
+    for key in entry:
+        if key not in ENTRY_KEYS:
+            raise ConfigError(
+                f"unknown key {key!r} in [models.{name}]. The keys are "
+                f"{', '.join(ENTRY_KEYS)}."
+            )
+    label = f"models.{name}"
+    if not entry.get("model"):
+        raise ConfigError(f"{label}.model: no value. Each entry names a model.")
+    kind = _one_of(f"{label}.kind", entry.get("kind", "subscription"), KINDS)
+    _one_of(f"{label}.effort", entry.get("effort", "high"), EFFORTS)
+    for key in STEP_KEYS:
+        if key in entry:
+            _check_limit(f"{label}.{key}", key, entry[key])
+    _check_key_source(label, kind, entry)
+
+
+def _check_limit(label: str, key: str, value: Any) -> None:
+    limits, kind = LIMITS[key]
+    _in_range(label, value, limits, kind)
+
+
+def _check_key_source(label: str, kind: str, entry: Mapping[str, Any]) -> None:
+    """The 2 checks of the key that read the file, and not the environment."""
+    if entry.get("api_key") and entry.get("api_key_env"):
         raise ConfigError(
-            "api_key and api_key_env are both set. Use 1 of them."
+            f"{label}: api_key and api_key_env are both set. Use 1 of them."
         )
+    if kind != "subscription" and not (entry.get("api_key") or entry.get("api_key_env")):
+        raise ConfigError(
+            f"{label}: the provider kind {kind!r} needs a key. "
+            f"Set api_key_env or api_key."
+        )
+
+
+def _api_key(label: str, entry: Mapping[str, Any], env: Mapping[str, str]) -> str | None:
+    """Read the key of the selected entry. _check_key_source ran before."""
+    literal = entry.get("api_key")
+    variable = entry.get("api_key_env")
     if literal:
         return str(literal)
     if variable:
         value = env.get(str(variable))
         if not value:
             raise ConfigError(
-                f"api_key_env names {variable!r}, and that variable is empty "
-                f"or absent"
+                f"{label}.api_key_env names {variable!r}, and that variable is "
+                f"empty or absent"
             )
         return value
-    if kind != "subscription":
-        raise ConfigError(
-            f"the provider kind {kind!r} needs a key. Set api_key_env or api_key."
-        )
     return None
+
+
+def _select(entries: Mapping[str, Any], data: Mapping[str, Any], chosen: Any) -> str:
+    """Give the name of the entry of this call: the override, then default,
+    then the only entry."""
+    if not entries:
+        raise ConfigError(NO_MODEL)
+    names = ", ".join(entries)
+    default = data.get("default")
+    if "default" in data:
+        if not isinstance(default, str):
+            raise ConfigError(
+                f"default: the value {default!r} is not a string. It names 1 "
+                f"entry. The entries are {names}."
+            )
+        if default not in entries:
+            raise ConfigError(
+                f"default: the value {default!r} names no entry. "
+                f"The entries are {names}."
+            )
+    if chosen is not None:
+        if chosen not in entries:
+            raise ConfigError(
+                f"model: the value {chosen!r} names no entry. "
+                f"The entries are {names}."
+            )
+        return chosen
+    if default is not None:
+        return default
+    if len(entries) == 1:
+        return next(iter(entries))
+    raise ConfigError(
+        f"model: the file has {len(entries)} entries and no default. Set "
+        f'default = "<name>" in the file, or pass --model. '
+        f"The entries are {names}."
+    )
 
 
 def _one_of(key: str, value: Any, allowed: tuple[str, ...]) -> str:
