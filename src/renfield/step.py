@@ -24,7 +24,7 @@ import time
 from pathlib import Path
 from typing import Any, Callable, Iterator, Mapping, Sequence
 
-from renfield.config import Skill, Step
+from renfield.config import ConfigError, Skill, Step
 from renfield.outputs import check_outputs
 from renfield.paths import Paths, make_dirs, render as render_paths
 from renfield.provider import Provider, ProviderError, build_env
@@ -214,9 +214,15 @@ def _command(step: Step, run, executable: str) -> list[str]:
     ]
     if step.max_usd is not None:
         command += ["--max-budget-usd", str(step.max_usd)]
-    for folder in (run.artifacts, *step.add_dirs):
-        if Path(folder).is_dir():
-            command += ["--add-dir", str(folder)]
+    # The artifacts folder may not exist yet: the agent makes its files
+    # there. A folder that the caller named must exist, because a run that
+    # cannot read its material still costs money.
+    if Path(run.artifacts).is_dir():
+        command += ["--add-dir", str(run.artifacts)]
+    for folder in step.add_dirs:
+        if not Path(folder).is_dir():
+            raise ConfigError(f"add_dirs: {str(folder)!r} is not a directory")
+        command += ["--add-dir", str(folder)]
     for skill in step.skills:
         command += ["--plugin-dir", str(skill.plugin)]
     return command

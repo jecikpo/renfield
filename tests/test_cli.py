@@ -256,3 +256,68 @@ def test_a_missing_program_exits_1_with_a_message_and_no_traceback(tmp_path, cap
     assert "claude-does-not-exist" in error
     assert "Traceback" not in error
     assert not (tmp_path / "out" / "record.json").exists()
+
+
+# --- the CLI tells a person what is wrong ---
+
+def test_a_missing_template_exits_1_with_a_message(tmp_path, capsys):
+    program = fake_claude(tmp_path, stream=SUCCESS)
+    args = argv(tmp_path, program)
+    args[args.index("--template") + 1] = str(tmp_path / "no-such.md")
+    assert main(args) == 1
+    error = capsys.readouterr().err
+    assert "no-such.md" in error
+    assert "Traceback" not in error
+
+
+def test_a_missing_template_with_render_only_exits_1(tmp_path, capsys):
+    program = fake_claude(tmp_path, stream=SUCCESS)
+    args = argv(tmp_path, program, "--render-only")
+    args[args.index("--template") + 1] = str(tmp_path / "no-such.md")
+    assert main(args) == 1
+    assert "no-such.md" in capsys.readouterr().err
+
+
+def test_a_missing_values_file_exits_1(tmp_path, capsys):
+    program = fake_claude(tmp_path, stream=SUCCESS)
+    code = main(argv(tmp_path, program, "--values", str(tmp_path / "no-values.json")))
+    assert code == 1
+    assert "no-values.json" in capsys.readouterr().err
+
+
+def test_a_malformed_values_file_exits_1(tmp_path, capsys):
+    program = fake_claude(tmp_path, stream=SUCCESS)
+    bad = tmp_path / "values.json"
+    bad.write_text("{not json")
+    assert main(argv(tmp_path, program, "--values", str(bad))) == 1
+    assert "renfield:" in capsys.readouterr().err
+
+
+def test_a_config_file_that_is_not_utf8_exits_1(tmp_path, capsys):
+    program = fake_claude(tmp_path, stream=SUCCESS)
+    bad = tmp_path / "renfield.toml"
+    bad.write_bytes(b"[provider]\nmodel = \"caf\xe9\"\n")
+    assert main(argv(tmp_path, program, "--config", str(bad))) == 1
+    assert "Traceback" not in capsys.readouterr().err
+
+
+# --- --add-dir ---
+
+def test_an_add_dir_that_is_a_directory_reaches_the_child(tmp_path):
+    material = tmp_path / "material"
+    material.mkdir()
+    program = fake_claude(tmp_path, stream=SUCCESS)
+    assert main(argv(tmp_path, program, "--add-dir", str(material))) == 0
+    command = call_record(tmp_path)["argv"]
+    assert command[command.index(str(material)) - 1] == "--add-dir"
+
+
+def test_an_add_dir_that_does_not_exist_exits_1_and_names_the_path(tmp_path, capsys):
+    """Before this check the folder was dropped with no message, and the
+    caller paid for a full run that could not read the material."""
+    program = fake_claude(tmp_path, stream=SUCCESS)
+    code = main(argv(tmp_path, program, "--add-dir", "/no/such/dir"))
+    assert code == 1
+    assert "/no/such/dir" in capsys.readouterr().err
+    with pytest.raises(FileNotFoundError):
+        call_record(tmp_path)

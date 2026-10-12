@@ -69,6 +69,12 @@ def main(argv: Sequence[str] | None = None) -> int:
     except (ConfigError, PathError, PromptError, ProviderError) as error:
         print(f"renfield: {error}", file=sys.stderr)
         return EXIT_CONFIG
+    except (OSError, ValueError) as error:
+        # A missing template, an unreadable values file, a malformed JSON
+        # values file. A person reads a message, not a traceback. The code
+        # stays 1, which section 8.4 calls a config error.
+        print(f"renfield: {error}", file=sys.stderr)
+        return EXIT_CONFIG
     except KeyboardInterrupt:
         print("\nCtrl-C: the step stopped.", file=sys.stderr)
         return EXIT_INTERRUPT
