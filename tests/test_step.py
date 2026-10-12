@@ -439,7 +439,8 @@ def test_a_ctrl_c_while_the_child_runs_leaves_an_interrupted_record(tmp_path):
     while it reads the stream. The record must survive, with the cost marked
     unknown: the child is in its own session, so the terminal's SIGINT never
     reached it, and Renfield cannot recover what the call cost. This is also
-    the first test that drives on_line, _console and describe_event."""
+    the first test that drives on_line, _console and describe_event. The
+    child sleeps, so the orphan check has a live child to catch."""
     tool = json.dumps(
         {
             "type": "assistant",
@@ -454,7 +455,9 @@ def test_a_ctrl_c_while_the_child_runs_leaves_an_interrupted_record(tmp_path):
             },
         }
     )
-    program = fake_claude(tmp_path, stream=tool + "\n" + SUCCESS)
+    program = fake_claude(
+        tmp_path, stream=SUCCESS, before=tool + "\n", sleep_s=30
+    )
     out = tmp_path / "out"
     seen = []
 
@@ -481,3 +484,18 @@ def test_a_ctrl_c_while_the_child_runs_leaves_an_interrupted_record(tmp_path):
     assert data["error_class"] == "interrupted"
     assert data["cost_known"] is False
     assert data["unknown_usd"] is None
+
+    child = call_record(tmp_path)["pid"]
+    deadline = time.monotonic() + 5.0
+    while time.monotonic() < deadline:
+        try:
+            os.kill(child, 0)
+        except ProcessLookupError:
+            break
+        time.sleep(0.05)
+    else:
+        os.kill(child, signal.SIGKILL)
+        raise AssertionError(
+            f"the child {child} outlived the Ctrl-C: an escape orphaned a "
+            f"paid child"
+        )
