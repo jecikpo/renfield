@@ -60,7 +60,16 @@ def render(paths: Paths, *, step: str, stamp: str | None = None) -> RunPaths:
     for key in ("run_dir", *RELATIVE):
         template = getattr(paths, key)
         _check(key, template)
-        filled[key] = template.format(**values)
+        try:
+            filled[key] = template.format(**values)
+        except (ValueError, KeyError, IndexError) as error:
+            # `_check` passes a template whose placeholder names are known,
+            # and `.format` can still fail on a conversion or a format spec.
+            # Measured: "{step!x}" and "{step:d}" both raise ValueError.
+            # Task 9's CLI catches PathError only.
+            raise PathError(
+                f"{key}: the value {template!r} is not a usable path: {error}"
+            ) from error
 
     for key in RELATIVE:
         if Path(filled[key]).is_absolute():
