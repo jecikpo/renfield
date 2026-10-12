@@ -145,6 +145,7 @@ class Step:
     retries: int = 2               # 0 to 2
     add_dirs: list[Path] = ()
     skills: list[Skill] = ()
+    model_entry: str | None = None # the [models.<name>] of the file, or None
 
 @dataclass
 class Skill:
@@ -157,6 +158,9 @@ prompt. The child then has the skill, and the prompt does not call it.
 
 The `name` reaches the file names of the run folder. A name with a dot keeps
 its last part only: `review.deep` writes `prompts/deep.md`.
+
+`load()` sets `model_entry` to the selected entry. A caller that builds a
+`Step` itself can leave it empty.
 
 ### 4.3 `run_step`
 
@@ -194,7 +198,8 @@ seconds.
 |---|---|
 | `name`, `status` | `ok` or `failed` |
 | `error_class`, `error` | Section 8 |
-| `provider`, `model`, `effort` | What ran |
+| `provider`, `model`, `effort` | What ran. `model` is the raw model ID. |
+| `model_entry` | The `[models.<name>]` entry that the caller selected, or null |
 | `attempts` | 1, 2, or 3 |
 | `cost_usd`, `cost_known`, `cost_estimated`, `unknown_usd` | Section 9 |
 | `input_tokens`, `output_tokens`, `cache_read_tokens`, `cache_write_tokens` | The 4 counts |
@@ -233,16 +238,25 @@ either gets the behaviour of that value, and not an error.
 
 ```toml
 # renfield.toml
-[provider]
+default = "flash"
+
+[step]                 # shared values for all entries
+timeout_min = 20
+retries     = 2
+
+[models.flash]
 kind        = "openrouter"
 api_key_env = "OPENROUTER_API_KEY"
 model       = "deepseek/deepseek-v4.1-flash"
 effort      = "high"
+max_usd     = 0.50
 
-[step]
-timeout_min = 20
+[models.opus]
+kind        = "subscription"
+model       = "claude-opus-5-5"
+effort      = "xhigh"
 max_usd     = 6.0
-retries     = 2
+timeout_min = 40
 
 [paths]
 run_dir    = "runs/{stamp}-{step}"
@@ -252,18 +266,37 @@ artifacts  = "artifacts"
 record     = "record.json"
 ```
 
+Each `[models.<name>]` entry holds a provider, a model, an effort, and the 3
+step limits. `[step]` holds the step limits that all entries share. `default`
+names the entry of a call with no `--model`. With exactly 1 entry, `default` is
+optional.
+
 `api_key_env` names an environment variable. `api_key` holds the key itself.
-**If the file sets both, the config check fails.** A file that holds a key must
+**If an entry sets both, the config check fails.** A file that holds a key must
 not go into git.
+
+**Renfield checks each entry, and not only the selected entry.** It reads the
+key from the environment for the selected entry only, and not for a render
+with `--render-only`.
 
 ### 5.2 Precedence
 
+`[step]` accepts 3 keys only: `timeout_min`, `max_usd`, and `retries`. These 3
+keys have 4 layers:
+
 ```
-built-in defaults  <  renfield.toml  <  CLI flag or function argument
+built-in default  <  [step]  <  [models.<name>]  <  CLI flag or function argument
 ```
 
-Each layer overrides 1 key at a time. A `--model` flag does not drop the
-`effort` of the file.
+The 6 provider keys (`kind`, `model`, `effort`, `api_key`, `api_key_env`,
+`base_url`) have no `[step]` layer. They have 3 layers:
+
+```
+built-in default  <  [models.<name>]  <  CLI flag or function argument
+```
+
+Of the provider keys, only `effort` has a flag (`--effort`). An entry replaces
+only the keys that it sets. A flag replaces only its own key.
 
 ### 5.3 Ranges
 
@@ -275,9 +308,14 @@ Each layer overrides 1 key at a time. A `--model` flag does not drop the
 | `max_usd` | 0.01 to 1000, or absent | absent |
 | `retries` | 0 to 2 | 2 |
 | `name` | 1 to 64 characters of `a-z`, `0-9`, `-`, `_`, `.` | none |
+| entry name | 1 to 64 characters of `a-z`, `0-9`, `-`, `_`. No dot. | none |
+| `default` | the name of 1 entry | the only entry, when the file has 1 |
 
 A value outside its range is a config error. **The message names the key, the
 range, and the value.** A type check is not a range check.
+
+For a key of an entry, the message names `models.<name>.<key>`. For a key of
+`[step]`, it names `step.<key>`.
 
 ### 5.4 The paths
 
@@ -482,7 +520,7 @@ renfield run \
   --workdir . \
   --config renfield.toml \
   --name review \
-  --model deepseek/deepseek-v4.1-flash
+  --model flash
 ```
 
 | Flag | Meaning |
@@ -496,8 +534,8 @@ renfield run \
 | `--config PATH` | The TOML file. Default: `renfield.toml`, when it is there. |
 | `--name NAME` | The step name. Default: the stem of the template. |
 | `--run-dir`, `--prompt`, `--transcript`, `--artifacts`, `--record` | Override 1 path of section 5.4. |
-| `--model`, `--effort`, `--timeout-min`, `--max-usd`, `--retries` | Override 1 step key. |
-| `--provider`, `--api-key-env` | Override the provider. |
+| `--model NAME` | Select the `[models.<name>]` entry. Default: `default`, or the only entry. |
+| `--effort`, `--timeout-min`, `--max-usd`, `--retries` | Override 1 key of the selected entry. |
 | `--render-only` | Fill the template, write it, and stop. 0 USD. |
 
 `renfield run --render-only` is the way to read the exact prompt before a call
@@ -509,7 +547,7 @@ Renfield writes 1 progress line for each event of interest: a tool call with its
 first argument, a turn, and the result. The last line names the record:
 
 ```
-review: deepseek/deepseek-v4.1-flash, effort high, limit 6.0 USD
+review: flash (deepseek/deepseek-v4.1-flash), effort high, limit 6.0 USD
   Read plan.md
   Read phase.py
   Bash grep -rn "run_step" src

@@ -49,7 +49,7 @@ renfield run \
   --output verdict.json \
   --schema verdict.json=schemas/verdict.schema.json \
   --workdir . \
-  --model claude-opus-5 \
+  --model opus \
   --config-dir /path/to/a/clean/config
 ```
 
@@ -89,16 +89,25 @@ print(record.status, record.cost_usd, record.outputs_valid)
 
 ```toml
 # renfield.toml
-[provider]
+default = "flash"
+
+[step]                 # shared values for all entries
+timeout_min = 20
+retries     = 2
+
+[models.flash]
 kind        = "openrouter"
 api_key_env = "OPENROUTER_API_KEY"
 model       = "deepseek/deepseek-v4.1-flash"
 effort      = "high"
+max_usd     = 0.50
 
-[step]
-timeout_min = 20
+[models.opus]
+kind        = "subscription"
+model       = "claude-opus-5-5"
+effort      = "xhigh"
 max_usd     = 6.0
-retries     = 2
+timeout_min = 40
 
 [paths]
 run_dir    = "runs/{stamp}-{step}"
@@ -108,7 +117,8 @@ artifacts  = "artifacts"
 record     = "record.json"
 ```
 
-The order of precedence is: built-in defaults, then this file, then the CLI flag.
+The order of precedence is: built-in defaults, then `[step]`, then the selected
+`[models.<name>]` entry, then the CLI flag. `--model NAME` selects the entry.
 
 The agent reads your own `~/.claude` unless you set `--config-dir` (or
 `config_dir` in Python). That folder holds your global `CLAUDE.md`, your user
