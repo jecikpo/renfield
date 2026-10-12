@@ -50,7 +50,7 @@ def _first_problem(
             continue
         try:
             data = json.loads(text)
-        except json.JSONDecodeError as error:
+        except (ValueError, RecursionError) as error:
             return f"{name} is not valid JSON: {error}"
 
         schema_path = schemas.get(name)
@@ -61,7 +61,17 @@ def _first_problem(
         except (OSError, UnicodeDecodeError, json.JSONDecodeError) as error:
             return f"the schema {schema_path} cannot be read: {error}"
 
-        problem = _validate(data, schema)
+        try:
+            problem = _validate(data, schema)
+        except Exception as error:
+            # A malformed schema raises from inside jsonschema, and the type
+            # varies: measured UnknownType, AttributeError and a referencing
+            # error from 4 different bad schemas. This function must return a
+            # reason, so the guard is wide and the message names the class.
+            return (
+                f"the schema {schema_path} is not usable: "
+                f"{error.__class__.__name__}: {error}"
+            )
         if problem is not None:
             return f"{name}: {problem}"
     return None

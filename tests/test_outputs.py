@@ -1,5 +1,7 @@
 import json
 
+import pytest
+
 from renfield.outputs import check_outputs
 
 SCHEMA = {
@@ -128,3 +130,46 @@ def test_a_schema_that_is_not_utf8_gives_a_reason_and_does_not_raise(tmp_path):
     ok, reason = check_outputs(tmp_path, ["verdict.json"], {"verdict.json": schema})
     assert ok is False
     assert "bad.schema.json" in reason
+
+
+@pytest.mark.parametrize(
+    "name,text",
+    [
+        ("bogus-type", '{"type": "bogus"}'),
+        ("list", "[1, 2, 3]"),
+        ("string", '"hello"'),
+        ("bad-ref", '{"$ref": "http://nope.invalid/x#"}'),
+    ],
+)
+def test_a_schema_that_is_not_usable_gives_a_reason_and_does_not_raise(
+    tmp_path, name, text
+):
+    """Measured: these 4 raise UnknownType, AttributeError, AttributeError and
+    a referencing error. check_outputs promises a reason, and run_step calls
+    it after the agent is paid for. Each case needs its own schema file,
+    because _schema is cached by path."""
+    (tmp_path / "verdict.json").write_text('{"a": 1}')
+    schema = tmp_path / f"{name}.schema.json"
+    schema.write_text(text)
+    ok, reason = check_outputs(
+        tmp_path, ["verdict.json"], {"verdict.json": schema}
+    )
+    assert ok is False
+    assert name in reason
+
+
+def test_a_json_output_that_nests_too_deeply_gives_a_reason(tmp_path):
+    """Measured: RecursionError, which is not a ValueError."""
+    (tmp_path / "verdict.json").write_text("[" * 100000)
+    ok, reason = check_outputs(tmp_path, ["verdict.json"], {})
+    assert ok is False
+    assert "verdict.json" in reason
+
+
+def test_a_json_output_with_a_huge_integer_gives_a_reason(tmp_path):
+    """Measured on Python 3.11 and later: a plain ValueError, "Exceeds the
+    limit (4300 digits) for integer string conversion"."""
+    (tmp_path / "verdict.json").write_text("1" * 5000)
+    ok, reason = check_outputs(tmp_path, ["verdict.json"], {})
+    assert ok is False
+    assert "verdict.json" in reason
