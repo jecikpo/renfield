@@ -3167,6 +3167,37 @@ reviewer who finds the fix must not read it as an accident.
 | 28 | The README install line shipped the placeholder `uv add git+https://github.com/<you>/renfield`, and this repository has no remote. The plan's own rule forbids a placeholder. Found by the task 9 implementer. | A local editable install, and 1 sentence that names the git form as conditional. |
 | 29 | The CLI's exit-code map had no test for the `budget` class, so a mutation that returned 5 for a budget stop passed all 166 tests. Exit 5 tells a calling agent not to retry. Found by the task 9 reviewer, verified by the controller. | A 4th case in the parametrized exit-4 test. |
 | 30 | **Preflight ruling R1, `env=os.environ`, had no test after 9 tasks.** Deleting that argument broke nothing in the suite, although the ruling exists because without it the `openrouter` and `anthropic-api` kinds are dead from the CLI. Found by the task 9 reviewer. | 1 CLI test that resolves an `api_key_env` from the environment, and also covers the file-to-flag precedence and the provider environment of the child. |
+| 31 | The child's pipes took the locale encoding, so a non-ASCII prompt was **silently corrupted** on a non-UTF-8 locale and the step still reported `ok`. Measured: `caf\u00e9` reached the child as a byte Claude Code cannot decode, and `\u2192` became a literal `?`, while the prompt file the record points at held correct UTF-8. `errors="replace"` prevented the exception and hid the loss. Found by the final review, measured by both it and the controller. | `encoding="utf-8"` on the `Popen`, and an explicit encoding on 4 more reads and writes. 2 tests. |
+| 32 | **`run_step` applied no range check to `Step`**, so the public API the README documents bypassed every check in `config.py`. Measured: `Step(effort="turbo", timeout_min=0, retries=99)` was accepted and `timeout_min = 0` killed the child at once, which is the measured bug the range rule exists for. Found by the final review, verified by the controller. | `Step.__post_init__` checks every key, so the invariant lives on the type. |
+| 33 | `read_stream` raised on a field of an unexpected type, and the cost of a paid call was lost. Measured: an event holding `"total_cost_usd": 2.5` with `"num_turns": "many"` raised `ValueError` and recorded 0.0 USD with the class `crashed`. **The 7th instance of this package's recurring class.** Found by the final review, verified by the controller. | A `_number` helper that gives a default on a bad type, applied to all 8 numeric reads. |
+| 34 | A child that never started was recorded as a call that may have cost the whole limit. Measured: a missing executable gave `unknown_usd=6.0` with `cost_known=false`, although nothing was paid, so a caller that bounds its budget the way section 9 says overstates its spend. Found by the final review, verified by the controller. | A `ProviderError` from the `Popen`, which `run_step` re-raises before the record wrapper, and the CLI maps to exit 1. |
+| 35 | The `lru_cache` on `_schema` could validate an output against another output's schema, giving a false `outputs_valid`, which is the exit 5 signal a caller must never retry. **The controller had parked this as a minor on the grounds that a CLI run is 1 step per process; the final review rejected that, because the library path is the documented public API and the stated first user is a long-running agent.** | The decorator is deleted. |
+| 36 | 6 ordinary user errors printed a traceback instead of a message, including a mistyped `--template`, which is the most likely error of the whole CLI. Found and each one measured by the final review. | The CLI catches `OSError` and `ValueError` and prints `renfield: <message>` with exit 1. |
+| 37 | An `--add-dir` that does not exist was dropped with no message, and `add_dirs` had no test at all, so a caller who mistyped a directory paid for a full agent run that could not read its material. Found by the final review. | A named `add_dir` that is not a directory raises `ConfigError`; the `is_dir()` filter stays for the artifacts folder only. 2 tests. |
+
+### What the 37 rows say about this plan
+
+**13 of the 37 are one defect class: a function that raises where it promised
+to return a value.** Rows 9, 10, 14, 15, 17, 19, 21, 22, 26, 31, 33 and 34 are
+that class, in 4 modules, found by 3 implementers, 4 task reviewers and the
+final review, over 6 fix rounds. Each fix was 1 to 6 lines. The plan specified
+the behaviour of every one of those functions correctly and never once
+specified the guard.
+
+**4 more are a second class: a test that passed under the mutation it was
+written to catch.** Rows 12, 24, 25 and 27. Each one was caught by an
+implementer that ran the mutation and reported the deviation instead of
+banking a green run, never by reading the test.
+
+The lesson is not "review more". It is 2 checklist items for the method:
+
+1. For every function whose signature returns a value, name the inputs that
+   make it raise, before writing it. A function called after money is spent
+   returns a reason; it does not raise.
+2. For every test that guards a behaviour, name the single change to the
+   source that the test must fail against, and run that change. A green run
+   is not evidence that a test works.
+
 
 **Spec coverage.** Each section of `docs/design.md` has a task: section 3 is
 tasks 3 and 8, section 4 is tasks 5, 7 and 8, section 5 is tasks 4 and 5,

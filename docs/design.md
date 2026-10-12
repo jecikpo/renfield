@@ -176,6 +176,8 @@ def run_step(
     config_dir: Path | None = None,
     on_line: Callable[[str], None] | None = None,
     sleep: Callable[[float], None] = time.sleep,
+    timeout_s: float | None = None,     # for a test. Section 4.5.
+    grace_s: float = 15.0,              # for a test. Section 4.5.
 ) -> StepRecord
 ```
 
@@ -203,6 +205,25 @@ seconds.
 
 **`tool_calls` answers a question that no other field answers.** A document
 that an agent wrote with 0 `Read` calls did not look at the code.
+
+---
+
+### 4.5 What the implementation adds to this section
+
+4 names exist in the code and not in the signatures above. Each one is
+deliberate, and this section records them so that a reader of the code finds
+them here too.
+
+| Name | Where | Why |
+|---|---|---|
+| `timeout_s` | `run_step` | A test cannot wait 60 seconds for `timeout_min`. It overrides the limit in seconds. |
+| `grace_s` | `run_step` | A test cannot wait 15 more seconds for the escalation of section 8.3. |
+| `child_exit_code` | `StepRecord` | Without it no test can tell a SIGINT death from a SIGKILL death, so the escalation would have no test that can fail. |
+| `session_id`, `thinking_tokens` | `StepResult` | Both come from the measured event shapes. `thinking_tokens` is the only measure of the work a killed call did. |
+
+**`timeout_s` and `grace_s` are the only numeric parameters of a public
+function that section 5.3 does not range-check.** A caller that passes 0 to
+either gets the behaviour of that value, and not an error.
 
 ---
 
@@ -308,7 +329,7 @@ each skill of the step, as `/<invoke>`.
 is a trap for a prompt that holds shell text.
 
 **A value is text, and Renfield reads no file for it.** `--value plan=docs/plan.md`
-puts the 14 characters `docs/plan.md` into the prompt. The agent then reads that
+puts the 12 characters `docs/plan.md` into the prompt. The agent then reads that
 file with its own tools. This keeps a large input out of the prompt, and it lets
 the agent read only the parts that it needs.
 
@@ -351,6 +372,7 @@ beside a failed status. The caller decides whether to use that file.
 | `timeout` | The child passed `timeout_min` | no |
 | `invalid_output` | Section 7 | no |
 | `interrupted` | Ctrl-C reached Renfield | no |
+| (none) | The agent program cannot be started. `ProviderError`, exit 1, and no record, because no child ran and nothing was paid | no |
 | `crashed` | Any other escape, for example an `OSError` from the transcript write | no |
 
 **`interrupted` and `crashed` keep a record of a paid call.** The child runs
@@ -379,6 +401,11 @@ reports the sum, and `attempts = 3`.
 At `timeout_min`, Renfield sends SIGINT to the **process group** of the child,
 and SIGKILL 15 seconds later.
 
+**The limit is for 1 attempt, and not for the step.** With `timeout_min = 20`
+and `retries = 2`, a step can run for 62.5 minutes: 3 attempts of 20 minutes,
+plus the 2 waits of 30 s and 120 s. A caller that sets its own deadline around
+Renfield must use that number.
+
 The group matters, because the child starts children of its own. A signal to
 the child alone leaves `rustc`, `cargo`, or a subagent to run.
 
@@ -394,6 +421,7 @@ after about 0.2 s and writes a result event with a real `total_cost_usd`. The
 | 1 | Config error, or a value outside its range |
 | 4 | The step failed: `auth`, `rate_limited`, `budget`, `transient`, or `timeout` |
 | 5 | The step finished, and an output is missing or fails its schema |
+| 2 | `argparse` rejected the command line, for example an unknown flag |
 | 130 | Ctrl-C |
 
 **Exit 4 and exit 5 must stay apart.** A caller retries a 4. A caller must never
@@ -584,3 +612,11 @@ separate decision, and this document does not make it.
    work on Windows.
 4. **The caller holds the concurrency.** Renfield runs 1 child. 2 calls of
    `run_step` in 1 process are not tested.
+5. **A child that cannot start at all costs 150 seconds of waiting.** A bad
+   model name or a bad flag makes the child exit at once with no result
+   event, which section 8.1 classes `transient`, so the retry sleeps 30 s and
+   then 120 s before a person is told. Measured on 2026-10-12:
+   `attempts=3, waits=[30, 120]`. A class of its own for "the child wrote no
+   result event and exited at once" would answer it. **Do not add one without
+   a measurement**: a real `claude` that fails to start may write a result
+   event that the current classes already cover.
