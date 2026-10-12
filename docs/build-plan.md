@@ -1531,6 +1531,28 @@ def test_a_schema_file_that_is_not_there_is_an_error(tmp_path):
     assert "gone.json" in reason
 
 
+def test_a_file_that_is_not_utf8_gives_a_reason_and_does_not_raise(tmp_path):
+    """check_outputs promises a reason, not an exception. run_step calls it
+    after the agent has been paid for, and the CLI catches 4 named errors
+    only, so a UnicodeDecodeError would reach a person as a traceback and the
+    record would never be written."""
+    (tmp_path / "report.md").write_bytes(b"\xff\xfe not utf 8")
+    ok, reason = check_outputs(tmp_path, ["report.md"], {})
+    assert ok is False
+    assert "report.md" in reason
+
+
+def test_a_schema_that_is_not_utf8_gives_a_reason_and_does_not_raise(tmp_path):
+    """UnicodeDecodeError is a ValueError, not an OSError, so the original
+    tuple did not catch it."""
+    (tmp_path / "verdict.json").write_text("{}")
+    schema = tmp_path / "bad.schema.json"
+    schema.write_bytes(b"\xff\xfe")
+    ok, reason = check_outputs(tmp_path, ["verdict.json"], {"verdict.json": schema})
+    assert ok is False
+    assert "bad.schema.json" in reason
+
+
 def test_no_output_at_all_passes(tmp_path):
     assert check_outputs(tmp_path, [], {}) == (True, None)
 ```
@@ -1584,7 +1606,13 @@ def _first_problem(
         path = artifacts / name
         if not path.is_file():
             return f"the agent did not write {name}"
-        text = path.read_text().strip()
+        try:
+            text = path.read_text().strip()
+        except (OSError, UnicodeDecodeError) as error:
+            # This function promises a reason, not an exception. run_step
+            # calls it after the agent has been paid for, and the CLI catches
+            # 4 named errors only.
+            return f"{name} cannot be read: {error}"
         if not text:
             return f"{name} is empty"
 
@@ -1600,7 +1628,8 @@ def _first_problem(
             continue
         try:
             schema = _schema(str(schema_path))
-        except (OSError, json.JSONDecodeError) as error:
+        except (OSError, UnicodeDecodeError, json.JSONDecodeError) as error:
+            # UnicodeDecodeError is a ValueError and not an OSError.
             return f"the schema {schema_path} cannot be read: {error}"
 
         problem = _validate(data, schema)
@@ -3105,6 +3134,7 @@ reviewer who finds the fix must not read it as an accident.
 | 11 | `_in_range` ended with `return kind(value)`, so `timeout_min = 30.9` passed the range check and became 30, with no message. The module exists to stop exactly that. Found by the task 5 reviewer, measured by the controller. | A whole-number check for the `int` keys. `30.0` still passes. |
 | 12 | Task 5's range test asserted `str(value) in message`, which the `240` of the range satisfies for `timeout_min = 0`. 3 of its 6 cases passed whatever the code printed. Found by the task 5 reviewer, measured by the controller. | The assertion is the exact phrase `f"the value is {value}"`. |
 | 13 | Task 5 had no test that an in-range boundary is accepted, so changing `<=` to `<` would have left the suite green. It also had no test for an out-of-range override, a non-number value, or an unknown `kind`. Found by the task 5 reviewer. | 5 added tests: both ends of all 3 ranges, an override, a bool and a string, an unknown kind, and both fraction cases. |
+| 14 | `check_outputs` is declared `-> tuple[bool, str | None]` and leaked `UnicodeDecodeError` from `read_text`. `run_step` calls it after the agent is paid for, so the record would never be written. The schema read had the same gap, because `UnicodeDecodeError` is a `ValueError` and not an `OSError`. Found by the task 6 implementer, measured by the controller. | Both reads are guarded and return a reason. 2 tests. |
 
 **Spec coverage.** Each section of `docs/design.md` has a task: section 3 is
 tasks 3 and 8, section 4 is tasks 5, 7 and 8, section 5 is tasks 4 and 5,
