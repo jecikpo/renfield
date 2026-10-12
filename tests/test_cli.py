@@ -171,3 +171,30 @@ def test_ctrl_c_exits_130_and_says_so_on_stderr(tmp_path, capsys, monkeypatch):
     code = main(argv(tmp_path, program))
     assert code == 130
     assert "Ctrl-C" in capsys.readouterr().err
+
+
+RATE_LIMIT = json.dumps(
+    {"type": "result", "subtype": "success", "is_error": True,
+     "api_error_status": 429, "total_cost_usd": 0.1, "result": "slow down"}
+) + "\n"
+
+SERVER = json.dumps(
+    {"type": "result", "subtype": "error", "is_error": True,
+     "api_error_status": 503, "total_cost_usd": 0.2, "result": "upstream"}
+) + "\n"
+
+
+@pytest.mark.parametrize(
+    "stream,expected_class",
+    [(AUTH, "auth"), (RATE_LIMIT, "rate_limited"), (SERVER, "transient")],
+)
+def test_every_failure_class_exits_4_and_never_5(tmp_path, stream, expected_class):
+    """Exit 4 and exit 5 are this CLI's core contract: a caller retries a 4
+    and must never retry a 5. The first test covered the auth class only, so
+    a mutant that returned 5 for a rate limit or a server failure would have
+    passed. --retries 0 keeps the transient case from sleeping 150 s."""
+    program = fake_claude(tmp_path, stream=stream)
+    code = main(argv(tmp_path, program, "--retries", "0"))
+    assert code == 4
+    data = json.loads((tmp_path / "out" / "record.json").read_text())
+    assert data["error_class"] == expected_class

@@ -31,8 +31,11 @@ key, or an OpenRouter key.
 ## Install
 
 ```sh
-uv add git+https://github.com/<you>/renfield
+uv add --editable /path/to/renfield
 ```
+
+Renfield has no published package. If you host this repository,
+`uv add git+<the repository URL>` works too.
 
 ## Use it from the command line
 

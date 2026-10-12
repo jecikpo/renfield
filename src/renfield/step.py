@@ -282,6 +282,12 @@ def _run_once(
         raise
     finally:
         watchdog.cancel()
+        if process.stdout is not None:
+            # read_stream consumed this pipe but never closed it. Without
+            # this, every call leaks the child's output pipe until the
+            # collector runs, and a caller that loops runs out of file
+            # descriptors. Measured: 20 ResourceWarnings from test_step.py.
+            process.stdout.close()
 
     if timed_out.is_set():
         result.ok = False
