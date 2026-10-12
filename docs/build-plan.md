@@ -1914,7 +1914,7 @@ git commit -m "feat: the step record, the record file, and the console lines"
 
 **Interfaces:**
 - Consumes: each earlier module.
-- Produces: `run_step(...) -> StepRecord`, `render_prompt(template, values, skills, path) -> str`, `RETRY_WAITS`, `STOP_WAIT_S`, `PromptError`.
+- Produces: `run_step(...) -> StepRecord`, `render_prompt(text, values, skills) -> str`, `RETRY_WAITS`, `STOP_WAIT_S`, `PromptError`.
 
 **This is the only module that starts a child process.** It holds the 3 behaviours that a reviewer must not simplify: the process group, the SIGINT before the SIGKILL, and the retry that fires for 1 class only.
 
@@ -3154,6 +3154,9 @@ reviewer who finds the fix must not read it as an accident.
 | 15 | 2 more paths of `check_outputs` raised instead of returning a reason. 4 malformed schemas gave 4 unrelated exception types from inside jsonschema, and `json.loads` gave `RecursionError` for deep nesting and a plain `ValueError` over the 4300-digit integer limit. Found by the task 6 reviewer, measured by the controller. | A wide guard around `_validate`, and `(ValueError, RecursionError)` on the parse. 6 tests. |
 | 16 | The test the controller wrote for the defect 15 schema case used `{"$ref": "http://nope.invalid/x#"}`, which makes a real DNS lookup and breaks the global constraint "No test uses the network". Found by the task 6 implementer, who kept the text and reported it. | A local pointer, `{"$ref": "#/definitions/missing"}`, measured to reach the same guard offline. |
 | 17 | The defect 15 fix closed the validate path and left the **schema file read** open to the same 2 classes. A schema file of `"1"*5000` leaks `ValueError` and one of `"["*100000` leaks `RecursionError`. Found by the task 6 re-reviewer, measured by the controller. | The schema tuple becomes `(OSError, ValueError, RecursionError)`. 2 tests. |
+| 18 | The task 8 interface block promised `render_prompt(template, values, skills, path)`, and the task's own code and tests use 3 arguments and return the text. Found by the task 8 implementer. | The interface line names `render_prompt(text, values, skills)`. |
+| 19 | `run_step` leaked `UnicodeDecodeError` when the child wrote invalid UTF-8, and `BrokenPipeError` when the child exited before it read a large prompt. Both escape after the agent may already have been paid for. Found by the task 8 implementer, measured by the controller. | `errors="replace"` on the `Popen`, which also keeps the valid events before the bad bytes, and a guard on the prompt write. 2 tests. |
+| 20 | `_kill_group` could fire between the end of the stream and the cancel of its timer, and label a finished call a timeout. Found by the task 8 implementer; reasoned, not measured. | An early return when `process.poll()` is not `None`. 1 test against the private function. |
 
 **Spec coverage.** Each section of `docs/design.md` has a task: section 3 is
 tasks 3 and 8, section 4 is tasks 5, 7 and 8, section 5 is tasks 4 and 5,
