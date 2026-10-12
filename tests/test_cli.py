@@ -183,10 +183,20 @@ SERVER = json.dumps(
      "api_error_status": 503, "total_cost_usd": 0.2, "result": "upstream"}
 ) + "\n"
 
+BUDGET = json.dumps(
+    {"type": "result", "subtype": "error_max_budget_usd", "is_error": True,
+     "total_cost_usd": 4.0, "result": "the budget is spent"}
+) + "\n"
+
 
 @pytest.mark.parametrize(
     "stream,expected_class",
-    [(AUTH, "auth"), (RATE_LIMIT, "rate_limited"), (SERVER, "transient")],
+    [
+        (AUTH, "auth"),
+        (RATE_LIMIT, "rate_limited"),
+        (SERVER, "transient"),
+        (BUDGET, "budget"),
+    ],
 )
 def test_every_failure_class_exits_4_and_never_5(tmp_path, stream, expected_class):
     """Exit 4 and exit 5 are this CLI's core contract: a caller retries a 4
@@ -198,3 +208,42 @@ def test_every_failure_class_exits_4_and_never_5(tmp_path, stream, expected_clas
     assert code == 4
     data = json.loads((tmp_path / "out" / "record.json").read_text())
     assert data["error_class"] == expected_class
+
+
+def test_the_cli_resolves_an_api_key_from_the_environment(tmp_path, monkeypatch):
+    """Preflight ruling R1: without env=os.environ in the load() call, load
+    sees an empty environment and an api_key_env can never resolve, so only
+    the subscription kind works from the CLI. Deleting that argument breaks
+    no other test in the suite. This also covers the file-to-flag precedence
+    and the openrouter environment of the child."""
+    config = tmp_path / "renfield.toml"
+    config.write_text(
+        '[provider]\n'
+        'kind = "openrouter"\n'
+        'api_key_env = "OR_KEY"\n'
+        'model = "from-the-file"\n'
+        'effort = "medium"\n'
+    )
+    monkeypatch.setenv("OR_KEY", "the-key-of-the-environment")
+    program = fake_claude(tmp_path, stream=SUCCESS)
+
+    template = tmp_path / "t.md"
+    template.write_text("read $plan\n")
+    code = main([
+        "run",
+        "--template", str(template),
+        "--value", "plan=docs/plan.md",
+        "--config", str(config),
+        "--workdir", str(tmp_path),
+        "--run-dir", str(tmp_path / "out"),
+        "--executable", str(program),
+        "--model", "from-the-flag",
+    ])
+
+    assert code == 0
+    call = call_record(tmp_path)
+    assert call["env"]["ANTHROPIC_AUTH_TOKEN"] == "the-key-of-the-environment"
+    assert call["env"]["ANTHROPIC_API_KEY"] == ""
+    argv = call["argv"]
+    assert argv[argv.index("--model") + 1] == "from-the-flag", "a flag beats the file"
+    assert argv[argv.index("--effort") + 1] == "medium", "the file keeps its own key"
