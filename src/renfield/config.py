@@ -194,4 +194,8 @@ def _in_range(key: str, value: Any, limits: tuple, kind) -> Any:
         raise ConfigError(
             f"{key}: the range is {low} to {high}, and the value is {value}"
         )
+    if kind is int and value != int(value):
+        raise ConfigError(
+            f"{key}: the value {value} is not a whole number"
+        )
     return kind(value)

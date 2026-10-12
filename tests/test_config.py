@@ -89,7 +89,7 @@ def test_a_number_outside_its_range_names_the_key_the_range_and_the_value(
         load(write(tmp_path, text), env={})
     message = str(caught.value)
     assert key in message
-    assert str(value) in message
+    assert f"the value is {value}" in message
     assert " to " in message, "the message must name the range"
 
 
@@ -160,3 +160,71 @@ def test_a_good_step_name_is_accepted(name):
 def test_a_bad_step_name_is_an_error(name):
     with pytest.raises(ConfigError, match="name"):
         load(None, overrides={"name": name, "model": "m"}, env={})
+
+
+@pytest.mark.parametrize(
+    "key,value",
+    [
+        ("timeout_min", 1),
+        ("timeout_min", 240),
+        ("retries", 0),
+        ("retries", 2),
+        ("max_usd", 0.01),
+        ("max_usd", 1000.0),
+    ],
+)
+def test_each_end_of_each_range_is_accepted(tmp_path, key, value):
+    """A change of <= to < on either end is the range rule's own failure
+    mode, and nothing else in this file would catch it."""
+    text = f'[provider]\nmodel = "m"\n\n[step]\n{key} = {value}\n'
+    settings = load(write(tmp_path, text), env={})
+    assert getattr(settings.step, key) == value
+
+
+def test_an_override_outside_the_range_is_an_error(tmp_path):
+    with pytest.raises(ConfigError, match="timeout_min"):
+        load(
+            write(tmp_path, '[provider]\nmodel = "m"\n'),
+            overrides={"timeout_min": 0},
+            env={},
+        )
+
+
+@pytest.mark.parametrize("value", ["true", '"30"'])
+def test_a_value_that_is_not_a_number_names_the_range(tmp_path, value):
+    """A bool is an int in Python, so the bool guard must come first."""
+    text = f'[provider]\nmodel = "m"\n\n[step]\ntimeout_min = {value}\n'
+    with pytest.raises(ConfigError) as caught:
+        load(write(tmp_path, text), env={})
+    message = str(caught.value)
+    assert "timeout_min" in message
+    assert "not a number" in message
+    assert " to " in message
+
+
+def test_an_unknown_kind_names_the_list(tmp_path):
+    text = '[provider]\nmodel = "m"\nkind = "moonshot"\n'
+    with pytest.raises(ConfigError) as caught:
+        load(write(tmp_path, text), env={})
+    message = str(caught.value)
+    assert "moonshot" in message
+    assert "openrouter" in message
+
+
+@pytest.mark.parametrize("key,value", [("timeout_min", 30.9), ("retries", 1.5)])
+def test_a_fraction_for_a_whole_number_key_is_an_error(tmp_path, key, value):
+    """Measured: int(30.9) is 30, so the person's value would be replaced
+    with no message."""
+    text = f'[provider]\nmodel = "m"\n\n[step]\n{key} = {value}\n'
+    with pytest.raises(ConfigError) as caught:
+        load(write(tmp_path, text), env={})
+    message = str(caught.value)
+    assert key in message
+    assert str(value) in message
+
+
+@pytest.mark.parametrize("key,value", [("timeout_min", 30.0), ("retries", 2.0)])
+def test_a_float_that_is_a_whole_number_is_accepted(tmp_path, key, value):
+    text = f'[provider]\nmodel = "m"\n\n[step]\n{key} = {value}\n'
+    settings = load(write(tmp_path, text), env={})
+    assert getattr(settings.step, key) == int(value)
