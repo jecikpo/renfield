@@ -193,3 +193,17 @@ def test_a_schema_file_that_cannot_be_parsed_gives_a_reason(tmp_path, name, text
     assert ok is False
     assert "cannot be read" in reason
     assert name in reason
+
+
+def test_a_schema_that_changes_between_2_calls_is_read_again(tmp_path):
+    """The schema was cached by path for the life of the process. A caller
+    that runs many steps and rewrites a schema got a false outputs_valid,
+    the signal (exit 5) that a caller must never retry."""
+    (tmp_path / "verdict.json").write_text('{"findings": []}')
+    schemas = {"verdict.json": schema_file(tmp_path)}
+    assert check_outputs(tmp_path, ["verdict.json"], schemas)[0] is True
+
+    schema_file(tmp_path, data={"type": "object", "required": ["summary"]})
+    ok, reason = check_outputs(tmp_path, ["verdict.json"], schemas)
+    assert ok is False
+    assert "summary" in reason
