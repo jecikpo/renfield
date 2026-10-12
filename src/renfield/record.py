@@ -9,6 +9,7 @@ from pathlib import Path
 # Claude Code prices every call at Anthropic rates, whatever vendor served
 # it. Measured on 2026-09-16: a call on meta-llama/llama-3.1-8b-instruct
 # reported 0.3141 USD, and OpenRouter charges about 0.002 USD for it.
+# docs/design.md, section 9, names the run that recorded this.
 ESTIMATED_KINDS = ("subscription", "openrouter")
 
 
