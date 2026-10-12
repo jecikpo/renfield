@@ -10,6 +10,7 @@ in tests/fixtures/stream/.
 from __future__ import annotations
 
 import json
+import math
 from collections import Counter
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -110,11 +111,19 @@ def read_stream(
     if not isinstance(usage, Mapping):
         usage = {}
     error_class = _error_class(result_event)
+    cost = _number(result_event, "total_cost_usd", float, 0.0)
+    cost_known = True
+    if not math.isfinite(cost):
+        # A provider that reports a non-finite cost has told us nothing
+        # usable. `cost_known` is the field for exactly that, and a NaN that
+        # travels further reaches record.json as invalid JSON and the console
+        # line as "nan USD".
+        cost, cost_known = 0.0, False
     return StepResult(
         ok=error_class is None,
         error_class=error_class,
         error=None if error_class is None else _error_text(result_event),
-        cost_usd=_number(result_event, "total_cost_usd", float, 0.0),
+        cost_usd=cost,
         input_tokens=_number(usage, "input_tokens", int, 0),
         output_tokens=_number(usage, "output_tokens", int, 0),
         cache_read_tokens=_number(usage, "cache_read_input_tokens", int, 0),
@@ -123,6 +132,7 @@ def read_stream(
         duration_s=_number(result_event, "duration_ms", float, 0.0) / 1000.0,
         session_id=result_event.get("session_id"),
         tool_calls=dict(tools),
+        cost_known=cost_known,
         thinking_tokens=thinking,
     )
 

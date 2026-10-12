@@ -3,6 +3,7 @@ from pathlib import Path
 
 import pytest
 
+from renfield.record import StepRecord, as_dict, summary_line, write_record
 from renfield.stream import describe_event, read_stream
 
 FIXTURES = Path(__file__).parent / "fixtures" / "stream"
@@ -146,3 +147,19 @@ def test_a_result_with_is_error_false_is_ok_whatever_its_subtype_says():
     result = read_stream([json.dumps(event) + "\n"])
     assert result.ok is True
     assert result.error_class is None
+
+
+def test_a_nan_cost_is_unmeasured_in_the_result_the_line_and_the_file(tmp_path):
+    """json.loads accepts NaN, so a provider can send it. Measured: the
+    summary line said "nan USD" while record.json said 0.0."""
+    text = '{"type": "result", "subtype": "success", "is_error": false, "total_cost_usd": NaN}\n'
+    result = read_stream([text])
+    assert result.cost_usd == 0.0
+    assert result.cost_known is False
+
+    record = StepRecord(name="s", status="ok", cost_usd=result.cost_usd,
+                        cost_known=result.cost_known)
+    assert "nan" not in summary_line(record).lower()
+    path = tmp_path / "record.json"
+    write_record(path, record)
+    assert json.loads(path.read_text())["cost_known"] is False
