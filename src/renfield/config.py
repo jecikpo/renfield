@@ -235,8 +235,12 @@ def _check_entry(name: str, entry: Any) -> None:
                 f"{', '.join(ENTRY_KEYS)}."
             )
     label = f"models.{name}"
-    if not entry.get("model"):
+    if "model" not in entry:
         raise ConfigError(f"{label}.model: no value. Each entry names a model.")
+    if not isinstance(entry["model"], str) or not entry["model"]:
+        raise ConfigError(
+            f"{label}.model: the value {entry['model']!r} is not a non-empty string"
+        )
     kind = _one_of(f"{label}.kind", entry.get("kind", "subscription"), KINDS)
     _one_of(f"{label}.effort", entry.get("effort", "high"), EFFORTS)
     for key in STEP_KEYS:

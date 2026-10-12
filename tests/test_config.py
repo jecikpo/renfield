@@ -503,3 +503,13 @@ def test_a_provider_key_in_the_step_table_is_an_unknown_key(tmp_path):
     message = raised(tmp_path, ONE + '\n[step]\neffort = "medium"\n')
     assert "'effort'" in message
     assert "[step]" in message
+
+
+@pytest.mark.parametrize("value", ["5", "0", "true", "[1]", "2026-10-12"])
+def test_a_model_that_is_not_a_string_is_an_error(tmp_path, value):
+    """str() made model = 5 the model ID '5', and a paid child started with
+    it."""
+    message = raised(tmp_path, f"[models.m]\nmodel = {value}\n")
+    assert "models.m.model" in message
+    assert "not a non-empty string" in message
+
